@@ -751,8 +751,9 @@ def main():
     parser.add_argument("--model_path", type=str, default=MODEL_PATH)
     parser.add_argument("--device", type=str, default="cuda:0")
     parser.add_argument("--attn_implementation", type=str, default=DEFAULT_ATTN_IMPLEMENTATION)
-    parser.add_argument("--host", type=str, default="0.0.0.0")
+    parser.add_argument("--host", type=str, default="127.0.0.1")
     parser.add_argument("--port", type=int, default=7860)
+    parser.add_argument("--root_path", type=str, default=None)
     parser.add_argument("--share", action="store_true")
     args = parser.parse_args()
 
@@ -785,6 +786,7 @@ def main():
     demo.queue(max_size=16, default_concurrency_limit=1).launch(
         server_name=args.host,
         server_port=args.port,
+        root_path=args.root_path,
         share=args.share,
     )
 
