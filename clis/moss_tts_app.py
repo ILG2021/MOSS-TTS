@@ -226,7 +226,7 @@ def estimate_duration_tokens(text: str) -> tuple[str, int, int, int]:
     factor = ZH_TOKENS_PER_CHAR if language == "zh" else EN_TOKENS_PER_CHAR
     default_tokens = max(1, int(effective_len * factor))
     min_tokens = max(1, int(default_tokens * 0.5))
-    max_tokens = max(min_tokens, int(default_tokens * 1.5))
+    max_tokens = max(min_tokens + 1, int(default_tokens * 1.5))
     return language, default_tokens, min_tokens, max_tokens
 
 
@@ -535,7 +535,7 @@ def build_demo(args: argparse.Namespace):
                 )
                 duration_tokens = gr.Slider(
                     minimum=1,
-                    maximum=1,
+                    maximum=2,
                     step=1,
                     value=1,
                     label="expected_tokens",
