@@ -82,7 +82,7 @@ For full details, see:
 MOSS-TTS-v1.5 currently supports **31 languages**. It keeps the 20 languages supported by MOSS-TTS 1.0 and extends multilingual continued training to Cantonese, Dutch, Finnish, Hindi, Macedonian, Malay, Romanian, Swahili, Tagalog, Thai, and Vietnamese.
 
 | Language | Code | Flag | Language | Code | Flag | Language | Code | Flag |
-|---|---|---|---|---|---|---|---|---|
+|---|---|---|---|---|---|---|
 | Chinese | zh | 🇨🇳 | Cantonese | yue | 🇭🇰 | English | en | 🇺🇸 |
 | Arabic | ar | 🇸🇦 | Czech | cs | 🇨🇿 | Danish | da | 🇩🇰 |
 | Dutch | nl | 🇳🇱 | Finnish | fi | 🇫🇮 | French | fr | 🇫🇷 |
@@ -164,8 +164,8 @@ text_7 = "Bonjour, je voudrais essayer une voix française naturelle et stable."
 text_8 = "我今天学习了一首中国的古诗，它的名字是[pause 3.2s]静夜思！"
 
 # Use audio from ./assets/audio to avoid downloading from the cloud.
-ref_audio_1 = "https://speech-demo.oss-cn-shanghai.aliyuncs.com/moss_tts_demo/tts_readme_demo/reference_zh.wav"
-ref_audio_2 = "https://speech-demo.oss-cn-shanghai.aliyuncs.com/moss_tts_demo/tts_readme_demo/reference_en.m4a"
+ref_audio_1 = "../assets/audio/reference_zh.wav"
+ref_audio_2 = "../assets/audio/reference_en.m4a"
 
 conversations = [
     # Direct TTS (no reference). Language tags are recommended in v1.5.
@@ -278,8 +278,8 @@ text_2 = "We stand on the threshold of the AI era.\nArtificial intelligence is n
 ref_text_1 = "太阳系八大行星之一。"
 ref_text_2 = "But I really can't complain about not having a normal college experience to you."
 # Use audio from ./assets/audio to avoid downloading from the cloud.
-ref_audio_1 = "https://speech-demo.oss-cn-shanghai.aliyuncs.com/moss_tts_demo/tts_readme_demo/reference_zh.wav"
-ref_audio_2 = "https://speech-demo.oss-cn-shanghai.aliyuncs.com/moss_tts_demo/tts_readme_demo/reference_en.m4a"
+ref_audio_1 = "../assets/audio/reference_zh.wav"
+ref_audio_2 = "../assets/audio/reference_en.m4a"
 
 conversations = [
     # Continuatoin only

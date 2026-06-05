@@ -50,7 +50,7 @@ For full architecture details, see **`moss_tts_delay/README.md`**.
 MOSS-TTSD-v1.0 currently follows the original MOSS-TTS family language set and supports **20 languages**:
 
 | Language | Code | Flag | Language | Code | Flag | Language | Code | Flag |
-|---|---|---|---|---|---|---|---|---|
+|---|---|---|---|---|---|---|
 | Chinese | zh | 🇨🇳 | English | en | 🇺🇸 | German | de | 🇩🇪 |
 | Spanish | es | 🇪🇸 | French | fr | 🇫🇷 | Japanese | ja | 🇯🇵 |
 | Italian | it | 🇮🇹 | Hungarian | hu | 🇭🇺 | Korean | ko | 🇰🇷 |
@@ -119,8 +119,8 @@ model.eval()
 # --- Inputs ---
 
 # Use audio from ./assets/audio to avoid downloading from the cloud.
-prompt_audio_speaker1 = "https://speech-demo.oss-cn-shanghai.aliyuncs.com/moss_tts_demo/tts_readme_demo/reference_02_s1.wav"
-prompt_audio_speaker2 = "https://speech-demo.oss-cn-shanghai.aliyuncs.com/moss_tts_demo/tts_readme_demo/reference_02_s2.wav"
+prompt_audio_speaker1 = "../assets/audio/reference_02_s1.wav"
+prompt_audio_speaker2 = "../assets/audio/reference_02_s2.wav"
 prompt_text_speaker1 = "[S1] In short, we embarked on a mission to make America great again for all Americans."
 prompt_text_speaker2 = "[S2] NVIDIA reinvented computing for the first time after 60 years. In fact, Erwin at IBM knows quite well that the computer has largely been the same since the 60s."
 

@@ -173,8 +173,8 @@ text_5 = "您好，请问您来自哪 zuo4 cheng2 shi4？"
 text_6 = "/həloʊ, meɪ aɪ æsk wɪtʃ sɪti juː ɑːr frʌm?/"
 
 # Use audio from ./assets/audio to avoid downloading from the cloud.
-ref_audio_1 = "https://speech-demo.oss-cn-shanghai.aliyuncs.com/moss_tts_demo/tts_readme_demo/reference_zh.wav"
-ref_audio_2 = "https://speech-demo.oss-cn-shanghai.aliyuncs.com/moss_tts_demo/tts_readme_demo/reference_en.m4a"
+ref_audio_1 = "../assets/audio/reference_zh.wav"
+ref_audio_2 = "../assets/audio/reference_en.m4a"
 
 conversations = [
     # Direct TTS (no reference)
@@ -302,7 +302,7 @@ text_1 = """亲爱的你，
 
 ref_text_1 = "太阳系八大行星之一。"
 # Use audio from ./assets/audio to avoid downloading from the cloud.
-ref_audio_1 = "https://speech-demo.oss-cn-shanghai.aliyuncs.com/moss_tts_demo/tts_readme_demo/reference_zh.wav"
+ref_audio_1 = "../assets/audio/reference_zh.wav"
 
 conversations = [
     # Continuatoin only
