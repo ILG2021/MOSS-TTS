@@ -11,6 +11,42 @@ import numpy as np
 import torch
 import torchaudio
 from transformers import AutoModel, AutoProcessor
+import transformers
+
+# Monkeypatch to fix Windows backslash issues in HF repo IDs. Remote processor
+# code may round-trip "org/repo" through pathlib.Path and produce "org\repo".
+def _patch_repo_id(pretrained_model_name_or_path):
+    if isinstance(pretrained_model_name_or_path, (str, os.PathLike)):
+        s = str(pretrained_model_name_or_path)
+        if "\\" in s and not os.path.exists(s):
+            return s.replace("\\", "/")
+    return pretrained_model_name_or_path
+
+
+def _patch_auto_from_pretrained(auto_cls):
+    orig_method = auto_cls.from_pretrained
+    orig_func = getattr(orig_method, "__func__", orig_method)
+
+    @classmethod
+    @functools.wraps(orig_func)
+    def patched_method(cls, pretrained_model_name_or_path, *args, **kwargs):
+        return orig_func(
+            cls,
+            _patch_repo_id(pretrained_model_name_or_path),
+            *args,
+            **kwargs,
+        )
+
+    auto_cls.from_pretrained = patched_method
+
+
+for _auto_cls in (
+    transformers.AutoConfig,
+    transformers.AutoTokenizer,
+    transformers.AutoProcessor,
+    transformers.AutoModel,
+):
+    _patch_auto_from_pretrained(_auto_cls)
 
 # Disable the broken cuDNN SDPA backend
 torch.backends.cuda.enable_cudnn_sdp(False)

@@ -42,6 +42,18 @@ from .tts_robust_normalizer_single_script import normalize_tts_text
 logger = logging.get_logger(__name__)
 
 
+def _resolve_pretrained_model_ref(pretrained_model_name_or_path):
+    pretrained_model_ref = os.fspath(pretrained_model_name_or_path)
+    local_model_path = Path(pretrained_model_ref)
+    if local_model_path.exists():
+        return local_model_path
+    if "\\" in pretrained_model_ref and not re.match(
+        r"^[A-Za-z]:\\|^\\\\", pretrained_model_ref
+    ):
+        return pretrained_model_ref.replace("\\", "/")
+    return pretrained_model_ref
+
+
 AUDIO_PLACEHOLDER = "<|audio|>"
 
 
@@ -217,18 +229,20 @@ class MossTTSDelayProcessor(ProcessorMixin):
         if audio_tokenizer_name_or_path is None:
             audio_tokenizer_name_or_path = "OpenMOSS-Team/MOSS-Audio-Tokenizer"
 
-        pretrained_model_name_or_path = Path(pretrained_model_name_or_path)
+        pretrained_model_ref = _resolve_pretrained_model_ref(
+            pretrained_model_name_or_path
+        )
         model_config = cast(
             MossTTSDelayConfig,
             AutoConfig.from_pretrained(
-                pretrained_model_name_or_path,
+                pretrained_model_ref,
                 *args,
                 trust_remote_code=trust_remote_code,
                 **kwargs,
             ),
         )
         tokenizer = AutoTokenizer.from_pretrained(
-            pretrained_model_name_or_path,
+            pretrained_model_ref,
             *args,
             trust_remote_code=trust_remote_code,
             **kwargs,
