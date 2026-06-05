@@ -523,95 +523,7 @@ def run_inference(
 
 
 def build_demo(args: argparse.Namespace):
-    custom_css = """
-    :root {
-      color-scheme: light;
-      --bg: #f6f7f8;
-      --panel: #ffffff;
-      --ink: #111418;
-      --muted: #4d5562;
-      --line: #e5e7eb;
-      --accent: #f97316;
-      --accent-hover: #ea580c;
-    }
-    body,
-    .gradio-container {
-      background: var(--bg) !important;
-      color: var(--ink) !important;
-      color-scheme: light;
-      --body-background-fill: var(--bg);
-      --background-fill-primary: var(--bg);
-      --background-fill-secondary: #eef1f4;
-      --block-background-fill: var(--panel);
-      --block-border-color: var(--line);
-      --block-info-text-color: var(--muted);
-      --body-text-color: var(--ink);
-      --body-text-color-subdued: var(--muted);
-      --input-background-fill: #ffffff;
-      --input-border-color: #d5d9df;
-      --input-placeholder-color: #7b8490;
-      --button-primary-background-fill: var(--accent);
-      --button-primary-background-fill-hover: var(--accent-hover);
-      --button-primary-text-color: #ffffff;
-      --button-secondary-background-fill: #ffffff;
-      --button-secondary-background-fill-hover: #f4f6f8;
-      --button-secondary-border-color: #d5d9df;
-      --button-secondary-text-color: var(--ink);
-    }
-    .gradio-container .block,
-    .gradio-container .form,
-    .gradio-container .panel {
-      border: 1px solid var(--line);
-      background: var(--panel) !important;
-      color: var(--ink) !important;
-    }
-    .gradio-container label,
-    .gradio-container .label-wrap,
-    .gradio-container .prose,
-    .gradio-container .prose * {
-      color: var(--ink) !important;
-    }
-    .gradio-container .info,
-    .gradio-container .prose p,
-    .gradio-container .prose li {
-      color: var(--muted) !important;
-    }
-    .helper-note {
-      background: #ffffff !important;
-      border: 1px solid var(--line) !important;
-      border-radius: 8px !important;
-      padding: 12px 14px !important;
-      margin: 8px 0 12px 0 !important;
-    }
-    .gradio-container input,
-    .gradio-container textarea,
-    .gradio-container select {
-      background: #ffffff !important;
-      color: var(--ink) !important;
-      border-color: #d5d9df !important;
-    }
-    #output_audio {
-      padding-bottom: 12px;
-      margin-bottom: 8px;
-      overflow: hidden !important;
-    }
-    #output_audio > .wrap {
-      overflow: hidden !important;
-    }
-    #output_audio audio {
-      margin-bottom: 6px;
-    }
-    #run-btn {
-      background: var(--accent) !important;
-      border: none !important;
-    }
-    """
-
-    with gr.Blocks(
-        title="",
-        theme=gr.themes.Soft(primary_hue="orange", neutral_hue="slate"),
-        css=custom_css,
-    ) as demo:
+    with gr.Blocks(title="") as demo:
         with gr.Row(equal_height=False):
             with gr.Column(scale=3):
                 text = gr.Textbox(
@@ -639,12 +551,8 @@ def build_demo(args: argparse.Namespace):
 
                     简单理解：只想换声音读新文本，选第一个；想接着一段音频继续说，并且声音别变，选第三个。
                     """,
-                    elem_classes=["helper-note"],
                 )
-                mode_hint = gr.Markdown(
-                    render_mode_hint(None, MODE_CLONE),
-                    elem_classes=["helper-note"],
-                )
+                mode_hint = gr.Markdown(render_mode_hint(None, MODE_CLONE))
                 language_tag = gr.Dropdown(
                     choices=LANGUAGE_TAG_CHOICES,
                     value="Chinese",
@@ -663,10 +571,7 @@ def build_demo(args: argparse.Namespace):
                     label="预计音频时长（秒）",
                     visible=False,
                 )
-                duration_hint = gr.Markdown(
-                    "时长控制未启用。",
-                    elem_classes=["helper-note"],
-                )
+                duration_hint = gr.Markdown("时长控制未启用。")
 
                 with gr.Accordion("采样参数（音频）", open=True):
                     temperature = gr.Slider(
