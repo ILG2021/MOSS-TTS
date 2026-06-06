@@ -111,11 +111,16 @@ torch.backends.cuda.enable_math_sdp(True)
 
 MODEL_PATH = "OpenMOSS-Team/MOSS-TTS-Local-Transformer"
 DEFAULT_ATTN_IMPLEMENTATION = "auto"
-DEFAULT_MAX_NEW_TOKENS = 3072
-DEFAULT_AUDIO_TEMPERATURE = 1.0
-DEFAULT_AUDIO_TOP_P = 0.95
-DEFAULT_AUDIO_TOP_K = 50
-DEFAULT_AUDIO_REPETITION_PENALTY = 1.1
+LOCAL_DEFAULT_MAX_NEW_TOKENS = 4096
+LOCAL_DEFAULT_AUDIO_TEMPERATURE = 1.0
+LOCAL_DEFAULT_AUDIO_TOP_P = 0.95
+LOCAL_DEFAULT_AUDIO_TOP_K = 50
+LOCAL_DEFAULT_AUDIO_REPETITION_PENALTY = 1.1
+DELAY_DEFAULT_MAX_NEW_TOKENS = 4096
+DELAY_DEFAULT_AUDIO_TEMPERATURE = 1.7
+DELAY_DEFAULT_AUDIO_TOP_P = 0.8
+DELAY_DEFAULT_AUDIO_TOP_K = 25
+DELAY_DEFAULT_AUDIO_REPETITION_PENALTY = 1.0
 CONTINUATION_NOTICE = (
     "续写模式已启用。请确认输入文本开头包含参考音频对应的转写文本。"
 )
@@ -164,6 +169,25 @@ LANGUAGE_TAG_CHOICES = [
     ("越南语", "Vietnamese"),
 ]
 LANGUAGE_TAG_LABELS = {value: label for label, value in LANGUAGE_TAG_CHOICES}
+
+
+def get_sampling_defaults(model_path: str) -> dict[str, float | int]:
+    normalized_model_path = (model_path or "").replace("\\", "/").lower()
+    if "local" in normalized_model_path:
+        return {
+            "max_new_tokens": LOCAL_DEFAULT_MAX_NEW_TOKENS,
+            "temperature": LOCAL_DEFAULT_AUDIO_TEMPERATURE,
+            "top_p": LOCAL_DEFAULT_AUDIO_TOP_P,
+            "top_k": LOCAL_DEFAULT_AUDIO_TOP_K,
+            "repetition_penalty": LOCAL_DEFAULT_AUDIO_REPETITION_PENALTY,
+        }
+    return {
+        "max_new_tokens": DELAY_DEFAULT_MAX_NEW_TOKENS,
+        "temperature": DELAY_DEFAULT_AUDIO_TEMPERATURE,
+        "top_p": DELAY_DEFAULT_AUDIO_TOP_P,
+        "top_k": DELAY_DEFAULT_AUDIO_TOP_K,
+        "repetition_penalty": DELAY_DEFAULT_AUDIO_REPETITION_PENALTY,
+    }
 
 
 def _parse_example_id(example_id: str) -> tuple[str, int] | None:
@@ -527,6 +551,8 @@ def run_inference(
 
 
 def build_demo(args: argparse.Namespace):
+    sampling_defaults = get_sampling_defaults(args.model_path)
+
     with gr.Blocks(title="") as demo:
         with gr.Row(equal_height=False):
             with gr.Column(scale=3):
@@ -582,43 +608,42 @@ def build_demo(args: argparse.Namespace):
                         minimum=0.1,
                         maximum=3.0,
                         step=0.05,
-                        value=DEFAULT_AUDIO_TEMPERATURE,
+                        value=sampling_defaults["temperature"],
                         label="温度",
                     )
                     top_p = gr.Slider(
                         minimum=0.1,
                         maximum=1.0,
                         step=0.01,
-                        value=DEFAULT_AUDIO_TOP_P,
+                        value=sampling_defaults["top_p"],
                         label="Top-p",
                     )
                     top_k = gr.Slider(
                         minimum=1,
                         maximum=200,
                         step=1,
-                        value=DEFAULT_AUDIO_TOP_K,
+                        value=sampling_defaults["top_k"],
                         label="Top-k",
                     )
                     repetition_penalty = gr.Slider(
                         minimum=0.8,
                         maximum=2.0,
                         step=0.05,
-                        value=DEFAULT_AUDIO_REPETITION_PENALTY,
+                        value=sampling_defaults["repetition_penalty"],
                         label="重复惩罚",
                     )
                     max_new_tokens = gr.Slider(
                         minimum=256,
                         maximum=8192,
                         step=128,
-                        value=DEFAULT_MAX_NEW_TOKENS,
+                        value=sampling_defaults["max_new_tokens"],
                         label="最大生成长度（高级）",
                     )
-
-                run_btn = gr.Button("生成语音", variant="primary", elem_id="run-btn")
 
             with gr.Column(scale=2):
                 output_audio = gr.Audio(label="输出音频", type="numpy", elem_id="output_audio")
                 status = gr.Textbox(label="状态", lines=4, interactive=False)
+                run_btn = gr.Button("生成语音", variant="primary", elem_id="run-btn")
                 examples_table = gr.Dataframe(
                     headers=["参考音色", "示例文本"],
                     value=[[name, text] for name, _, text in EXAMPLE_ROWS],
