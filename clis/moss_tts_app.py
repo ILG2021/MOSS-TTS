@@ -109,9 +109,13 @@ torch.backends.cuda.enable_flash_sdp(True)
 torch.backends.cuda.enable_mem_efficient_sdp(True)
 torch.backends.cuda.enable_math_sdp(True)
 
-MODEL_PATH = "OpenMOSS-Team/MOSS-TTS-v1.5"
+MODEL_PATH = "OpenMOSS-Team/MOSS-TTS-Local-Transformer"
 DEFAULT_ATTN_IMPLEMENTATION = "auto"
-DEFAULT_MAX_NEW_TOKENS = 4096
+DEFAULT_MAX_NEW_TOKENS = 3072
+DEFAULT_AUDIO_TEMPERATURE = 1.0
+DEFAULT_AUDIO_TOP_P = 0.95
+DEFAULT_AUDIO_TOP_K = 50
+DEFAULT_AUDIO_REPETITION_PENALTY = 1.1
 CONTINUATION_NOTICE = (
     "续写模式已启用。请确认输入文本开头包含参考音频对应的转写文本。"
 )
@@ -578,28 +582,28 @@ def build_demo(args: argparse.Namespace):
                         minimum=0.1,
                         maximum=3.0,
                         step=0.05,
-                        value=1.7,
+                        value=DEFAULT_AUDIO_TEMPERATURE,
                         label="温度",
                     )
                     top_p = gr.Slider(
                         minimum=0.1,
                         maximum=1.0,
                         step=0.01,
-                        value=0.8,
+                        value=DEFAULT_AUDIO_TOP_P,
                         label="Top-p",
                     )
                     top_k = gr.Slider(
                         minimum=1,
                         maximum=200,
                         step=1,
-                        value=25,
+                        value=DEFAULT_AUDIO_TOP_K,
                         label="Top-k",
                     )
                     repetition_penalty = gr.Slider(
                         minimum=0.8,
                         maximum=2.0,
                         step=0.05,
-                        value=1.0,
+                        value=DEFAULT_AUDIO_REPETITION_PENALTY,
                         label="重复惩罚",
                     )
                     max_new_tokens = gr.Slider(
