@@ -42,6 +42,59 @@ from .tts_robust_normalizer_single_script import normalize_tts_text
 logger = logging.get_logger(__name__)
 
 
+_ORIG_TORCHAUDIO_LOAD = torchaudio.load
+
+
+def _load_audio_with_soundfile_fallback(
+    filepath,
+    frame_offset=0,
+    num_frames=-1,
+    normalize=True,
+    channels_first=True,
+    format=None,
+    buffer_size=4096,
+    backend=None,
+):
+    try:
+        return _ORIG_TORCHAUDIO_LOAD(
+            filepath,
+            frame_offset=frame_offset,
+            num_frames=num_frames,
+            normalize=normalize,
+            channels_first=channels_first,
+            format=format,
+            buffer_size=buffer_size,
+            backend=backend,
+        )
+    except RuntimeError as exc:
+        if "Could not load libtorchcodec" not in str(exc):
+            raise
+
+        try:
+            import soundfile as sf
+        except ImportError as sf_exc:
+            raise RuntimeError(
+                "torchaudio could not load TorchCodec, and soundfile is not installed. "
+                "Install compatible FFmpeg/TorchCodec, or run: pip install soundfile"
+            ) from sf_exc
+
+        start = max(int(frame_offset), 0)
+        frames = -1 if num_frames is None else int(num_frames)
+        stop = None if frames < 0 else start + frames
+        wav, sample_rate = sf.read(
+            os.fspath(filepath),
+            start=start,
+            stop=stop,
+            dtype="float32",
+            always_2d=True,
+        )
+        wav = torch.from_numpy(wav.T if channels_first else wav)
+        return wav, sample_rate
+
+
+torchaudio.load = _load_audio_with_soundfile_fallback
+
+
 def _resolve_pretrained_model_ref(pretrained_model_name_or_path):
     pretrained_model_ref = os.fspath(pretrained_model_name_or_path)
     local_model_path = Path(pretrained_model_ref)
