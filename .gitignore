@@ -212,3 +212,5 @@ dev/*
 
 # Weights
 weights
+
+outputs/*

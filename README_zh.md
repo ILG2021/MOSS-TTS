@@ -38,6 +38,10 @@ MOSS‑TTS 家族是由 [MOSI.AI](https://mosi.cn/#hero) 与 [OpenMOSS 团队](h
 
 <a id="news"></a>
 ## 新闻
+* 2026.6.18：🚀 [MOSS-TTS-Local-Transformer-v1.5](https://huggingface.co/OpenMOSS-Team/MOSS-TTS-Local-Transformer-v1.5) 在 [SGLang-Omni](https://github.com/sgl-project/sglang-omni) 中获得 **Day-0 支持**，这是首个支持 `MossTTSLocal` 架构的推理后端，提供 OpenAI 兼容的 `/v1/audio/speech` 接口、流式输出和音色克隆。Cookbook 请见：[`moss_tts_local`](https://github.com/sgl-project/sglang-omni/blob/main/docs/cookbook/moss_tts_local.md)、[`moss_tts`](https://github.com/sgl-project/sglang-omni/blob/main/docs/cookbook/moss_tts.md)。
+* 2026.6.18：🚀 发布 [MOSS-TTS-Local-Transformer-v1.5](https://huggingface.co/OpenMOSS-Team/MOSS-TTS-Local-Transformer-v1.5)，这是一个 **4B** `MossTTSLocal` checkpoint，继承全部 v1.5 能力（语言标签、稳定音色克隆、显式停顿控制等），将 backbone 从 Qwen3-1.7B 扩展到 Qwen3-4B，并使用 **MOSS-Audio-Tokenizer-v2** 实现原生 **48 kHz 立体声** 输出。
+* 2026.6.7：🚀 发布 [MOSS-Audio-Tokenizer-v2](https://huggingface.co/OpenMOSS-Team/MOSS-Audio-Tokenizer-v2)，原生支持 48 kHz 立体声输入与输出。更多详情请查看 [MOSS-Audio-Tokenizer 仓库](https://github.com/OpenMOSS/MOSS-Audio-Tokenizer)！
+* 2026.6.2：🚀 [vLLM-Omni](https://github.com/vllm-project/vllm-omni) 现已支持完整 MOSS-TTS 系列（`MossTTSDelay`、`MossTTSRealtime` 和 `MossTTSNano` 架构），包括 MOSS-TTS-v1.5、MOSS-TTS、MOSS-TTSD、MOSS-SoundEffect、MOSS-VoiceGenerator、MOSS-TTS-Realtime 和 MOSS-TTS-Nano。请查看 [recipe](https://github.com/vllm-project/vllm-omni/blob/main/recipes/OpenMOSS/MOSS-TTS.md) 与 [examples](https://github.com/vllm-project/vllm-omni/tree/main/examples/offline_inference/text_to_speech/moss_tts)。
 * 2026.5.26：🚀 发布 [MOSS-SoundEffect-v2.0](https://huggingface.co/OpenMOSS-Team/MOSS-SoundEffect-v2.0)，全新文本到音频模型，采用 **DiT 主干 + Flow Matching 训练目标**，可从中英文本生成最长 **30 秒**、**48 kHz** 的音效，详见 [`moss_soundeffect_v2/`](https://github.com/OpenMOSS/MOSS-TTS/tree/main/moss_soundeffect_v2)。
 * 2026.5.26：🚀 发布 [MOSS-TTS-v1.5](https://huggingface.co/OpenMOSS-Team/MOSS-TTS-v1.5)，在提供语言标签时多语种合成更强，voice clone 更稳定，也改进了长参考短文本克隆、标点韵律跟随，并支持通过 `[pause X.Ys]` 显式控制停顿。
 * 2026.5.6：🚀 MOSS-TTS 和 MOSS-Audio-Tokenizer 现已支持 `mlx-audio`。详情请访问 [mlx-audio GitHub 仓库](https://github.com/Blaizzy/mlx-audio)。
@@ -73,6 +77,7 @@ MOSS‑TTS 家族是由 [MOSI.AI](https://mosi.cn/#hero) 与 [OpenMOSS 团队](h
   - [模型概览](#模型概览)
   - [支持的语言](#支持的语言)
   - [MOSS-TTS-v1.5](#moss-tts-v15)
+  - [MOSS-TTS-Local-Transformer-v1.5](#moss-tts-local-transformer-v15)
   - [快速开始](#快速开始)
     - [OpenClaw API Skills](#openclaw-api-skills)
     - [环境准备](#环境准备)
@@ -86,12 +91,9 @@ MOSS‑TTS 家族是由 [MOSI.AI](https://mosi.cn/#hero) 与 [OpenMOSS 团队](h
     - [安装方案](#安装方案)
     - [模型权重](#模型权重)
     - [配置](#配置)
-  - [SGLang 后端（加速推理）](#sglang-后端加速推理)
-    - [快速开始](#快速开始-2)
-    - [请求与返回](#请求与返回)
-      - [MOSS-TTS (Delay)](#moss-tts-delay)
-      - [MOSS-SoundEffect](#moss-soundeffect)
-      - [返回](#返回)
+  - [加速推理后端](#加速推理后端)
+    - [SGLang-Omni](#sglang-omni)
+    - [vLLM-Omni](#vllm-omni)
   - [评测](#评测)
     - [MOSS‑TTS 评测](#mosstts-评测)
     - [MOSS‑TTSD 评测](#mossttsd-评测)
@@ -149,6 +151,7 @@ MOSS‑TTS 家族是由 [MOSI.AI](https://mosi.cn/#hero) 与 [OpenMOSS 团队](h
 |---|---|---:|---|---|---|
 | **MOSS-TTS-v1.5** | `MossTTSDelay` | 8B | [![Model Card](https://img.shields.io/badge/Model%20Card-View-blue?logo=markdown)](docs/moss_tts_model_card.md) | [![Hugging Face](https://img.shields.io/badge/Huggingface-Model-orange?logo=huggingface)](https://huggingface.co/OpenMOSS-Team/MOSS-TTS-v1.5) | [![ModelScope](https://img.shields.io/badge/ModelScope-Model-7B61FF?logo=modelscope&logoColor=white)](https://modelscope.cn/models/openmoss/MOSS-TTS-v1.5) |
 | **MOSS-TTS 1.0** | `MossTTSDelay` | 8B | [![Model Card](https://img.shields.io/badge/Model%20Card-View-blue?logo=markdown)](docs/moss_tts_model_card.md) | [![Hugging Face](https://img.shields.io/badge/Huggingface-Model-orange?logo=huggingface)](https://huggingface.co/OpenMOSS-Team/MOSS-TTS) | [![ModelScope](https://img.shields.io/badge/ModelScope-Model-7B61FF?logo=modelscope&logoColor=white)](https://modelscope.cn/models/openmoss/MOSS-TTS) |
+| **MOSS-TTS-Local-Transformer-v1.5** | `MossTTSLocal` | 4B | [![Model Card](https://img.shields.io/badge/Model%20Card-View-blue?logo=markdown)](moss_tts_local_v1.5/README.md) | [![Hugging Face](https://img.shields.io/badge/Huggingface-Model-orange?logo=huggingface)](https://huggingface.co/OpenMOSS-Team/MOSS-TTS-Local-Transformer-v1.5) | [![ModelScope](https://img.shields.io/badge/ModelScope-Model-7B61FF?logo=modelscope&logoColor=white)](https://modelscope.cn/models/openmoss/MOSS-TTS-Local-Transformer-v1.5) |
 | **MOSS-TTS-Local-Transformer** | `MossTTSLocal` | 1.7B | [![Model Card](https://img.shields.io/badge/Model%20Card-View-blue?logo=markdown)](docs/moss_tts_model_card.md) | [![Hugging Face](https://img.shields.io/badge/Huggingface-Model-orange?logo=huggingface)](https://huggingface.co/OpenMOSS-Team/MOSS-TTS-Local-Transformer) | [![ModelScope](https://img.shields.io/badge/ModelScope-Model-7B61FF?logo=modelscope&logoColor=white)](https://modelscope.cn/models/openmoss/MOSS-TTS-Local-Transformer) |
 | **MOSS‑TTSD‑V1.0** | `MossTTSDelay` | 8B | [![Model Card](https://img.shields.io/badge/Model%20Card-View-blue?logo=markdown)](docs/moss_ttsd_model_card.md) | [![Hugging Face](https://img.shields.io/badge/Huggingface-Model-orange?logo=huggingface)](https://huggingface.co/OpenMOSS-Team/MOSS-TTSD-v1.0) | [![ModelScope](https://img.shields.io/badge/ModelScope-Model-7B61FF?logo=modelscope&logoColor=white)](https://modelscope.cn/models/openmoss/MOSS-TTSD-v1.0) |
 | **MOSS‑VoiceGenerator** | `MossTTSDelay` | 1.7B | [![Model Card](https://img.shields.io/badge/Model%20Card-View-blue?logo=markdown)](docs/moss_voice_generator_model_card.md) | [![Hugging Face](https://img.shields.io/badge/Huggingface-Model-orange?logo=huggingface)](https://huggingface.co/OpenMOSS-Team/MOSS-VoiceGenerator) | [![ModelScope](https://img.shields.io/badge/ModelScope-Model-7B61FF?logo=modelscope&logoColor=white)](https://modelscope.cn/models/openmoss/MOSS-VoiceGenerator) |
@@ -160,7 +163,7 @@ MOSS‑TTS 家族是由 [MOSI.AI](https://mosi.cn/#hero) 与 [OpenMOSS 团队](h
 
 ## 支持的语言
 
-MOSS-TTS-v1.5 当前支持 **31 种语言**。它保留了 [MOSS-TTS 1.0](https://huggingface.co/OpenMOSS-Team/MOSS-TTS) 支持的 20 种语言，并继续训练扩展到粤语、荷兰语、芬兰语、印地语、马其顿语、马来语、罗马尼亚语、斯瓦希里语、他加禄语、泰语和越南语。
+MOSS-TTS-v1.5 和 MOSS-TTS-Local-Transformer-v1.5 当前支持 **31 种语言**。它们保留了 [MOSS-TTS 1.0](https://huggingface.co/OpenMOSS-Team/MOSS-TTS) 支持的 20 种语言，并继续训练扩展到粤语、荷兰语、芬兰语、印地语、马其顿语、马来语、罗马尼亚语、斯瓦希里语、他加禄语、泰语和越南语。
 
 MOSS-TTSD 和 MOSS-TTS-Realtime 的语言覆盖请以各自 model card 为准。
 
@@ -185,6 +188,19 @@ MOSS-TTSD 和 MOSS-TTS-Realtime 的语言覆盖请以各自 model card 为准。
 相比 MOSS-TTS 1.0，v1.5 重点改进了以下方面：
 
 - **带语言标签的多语种合成更强**：当语言已知时，建议在构造用户消息时设置语言，例如 `processor.build_user_message(text=text_fr, language="French")`。
+- **voice clone 更稳定**：提升说话人相似度，并降低多次生成之间的音色波动。
+- **长参考音频、短目标文本的克隆更可靠**：当参考音频明显长于待合成文本时，v1.5 更稳定。
+- **标点驱动的韵律停顿更稳定**：尤其在长句中更能跟随标点停顿。
+- **显式停顿控制**：支持 `[pause X.Ys]` 这样的内联停顿标记，例如 `我今天学习了一首中国的古诗，它的名字是[pause 3.2s]静夜思！`。
+
+## MOSS-TTS-Local-Transformer-v1.5
+
+**MOSS-TTS-Local-Transformer-v1.5** 是 48 kHz 立体声 Local-Transformer 版本。它使用 [MOSS-Audio-Tokenizer-v2](https://huggingface.co/OpenMOSS-Team/MOSS-Audio-Tokenizer-v2) 作为音频 tokenizer，并在 [`moss_tts_local_v1.5/`](moss_tts_local_v1.5/README.md) 中提供实时流式解码示例。
+
+相比 [MOSS-TTS-Local-Transformer-v1.0](https://huggingface.co/OpenMOSS-Team/MOSS-TTS-Local-Transformer)，v1.5 重点改进了以下方面：
+
+- **更高保真的立体声音频建模**：v1.5 使用 [MOSS-Audio-Tokenizer-v2](https://huggingface.co/OpenMOSS-Team/MOSS-Audio-Tokenizer-v2) 作为音频 tokenizer，支持原生 48 kHz 立体声输入与输出，提供更丰富的空间细节和更自然的听感。
+- **带语言标签的多语种合成更强**：当语言已知时，建议在构造用户消息时设置语言，例如 `processor.build_user_message(text=text, language="French")`，或在对应 API 字段中指定。
 - **voice clone 更稳定**：提升说话人相似度，并降低多次生成之间的音色波动。
 - **长参考音频、短目标文本的克隆更可靠**：当参考音频明显长于待合成文本时，v1.5 更稳定。
 - **标点驱动的韵律停顿更稳定**：尤其在长句中更能跟随标点停顿。
@@ -492,87 +508,26 @@ python -m moss_tts_delay.llama_cpp \
 
 完整文档请查看 [moss_tts_delay/llama_cpp/README.md](moss_tts_delay/llama_cpp/README.md)。
 
-## SGLang 后端（加速推理）
+## 加速推理后端
 
-MOSS-TTS（Delay）支持使用 OpenMOSS 深度扩展的 [SGLang](https://github.com/OpenMOSS/sglang) 运行融合后的 MOSS-TTS 与 MOSS-Audio-Tokenizer 模型，实现面向音频生成的 **高效推理**。
+MOSS-TTS 模型可使用高吞吐推理后端进行生产部署。[SGLang-Omni](https://github.com/sgl-project/sglang-omni) 和 [vLLM-Omni](https://github.com/vllm-project/vllm-omni) 都提供 OpenAI 兼容服务，并支持流式输出和音色克隆。
 
-### 快速开始
+### SGLang-Omni
 
-```bash
-# 1. 克隆 SGLang 仓库
-git clone https://github.com/OpenMOSS/sglang.git
+[SGLang-Omni](https://github.com/sgl-project/sglang-omni) 支持 `MossTTSDelay` 和 `MossTTSLocal` 架构。它目前是唯一支持 `MossTTSLocal` 架构的推理后端，为 [MOSS-TTS-Local-Transformer-v1.5](https://huggingface.co/OpenMOSS-Team/MOSS-TTS-Local-Transformer-v1.5) 提供 Day-0 支持。
 
-# 2. 安装 SGLang
-pip install -e ./sglang/python[all]
+安装和使用请参考 cookbooks：
+- **MOSS-TTS（Delay）**：[`docs/cookbook/moss_tts.md`](https://github.com/sgl-project/sglang-omni/blob/main/docs/cookbook/moss_tts.md)
+- **MOSS-TTS-Local-Transformer**：[`docs/cookbook/moss_tts_local.md`](https://github.com/sgl-project/sglang-omni/blob/main/docs/cookbook/moss_tts_local.md)
 
-# 3. (可选) 解决 SGLang 的 CuDNN 兼容性报错
-#    RuntimeError: CRITICAL WARNING: PyTorch 2.9.1 & CuDNN Compatibility Issue Detected
-pip install nvidia-cudnn-cu12==9.16.0.29
+### vLLM-Omni
 
-# 4. 下载模型与音频编解码器权重
-huggingface-cli download OpenMOSS-Team/MOSS-TTS --local-dir weights/MOSS-TTS
-huggingface-cli download OpenMOSS-Team/MOSS-Audio-Tokenizer --local-dir weights/MOSS-Audio-Tokenizer
+[vLLM-Omni](https://github.com/vllm-project/vllm-omni) 支持 `MossTTSDelay`、`MossTTSRealtime` 和 `MossTTSNano` 架构，覆盖 MOSS-TTS、MOSS-TTS-v1.5、MOSS-TTSD、MOSS-SoundEffect、MOSS-VoiceGenerator、MOSS-TTS-Realtime 和 MOSS-TTS-Nano。
 
-# 5. 融合模型与音频编解码器权重
-python scripts/fuse_moss_tts_delay_with_codec.py --model-path weights/MOSS-TTS --codec-model-path weights/MOSS-Audio-Tokenizer --save-path weights/MOSS-TTS-Delay-With-Codec
-
-# 6. 启动服务
-sglang serve --model-path weights/MOSS-TTS-Delay-With-Codec --delay-pattern --trust-remote-code
-```
-
-> 如果融合输出目录已存在，可以在命令中追加 `--overwrite` 直接覆盖，或在脚本提示后输入字符确认覆盖。
-
-> **注意：** 首次启动服务后的第一次请求会触发较长时间的编译，这不是故障，请耐心等待。
-
-### 请求与返回
-
-#### MOSS-TTS (Delay)
-
-```bash
-curl -X POST http://localhost:30000/generate \
-  -H "Content-Type: application/json" \
-  -d '{
-    "text": "新增 SGLang 后端支持，实现高效推理。",
-    "audio_data": "https://cdn.jsdelivr.net/gh/OpenMOSS/MOSS-TTSD@main/legacy/v0.7/examples/zh_spk1_moon.wav",
-    "sampling_params": {
-      "max_new_tokens": 512,
-      "temperature": 1.7,
-      "top_p": 0.8,
-      "top_k": 25
-    }
-  }'
-```
-
-- `text` 表示待合成的文本内容；可在前缀加入 `${token:25}` 进行 token 控制，例如 `${token:25}你好 世界`
-- `audio_data` 表示可选的参考音频；不传入时会生成随机音色的音频，也可以是 `<path-to-audio-file>` 或 `data:audio/wav;base64,{b64_audio}`，其中 `b64_audio` 为 wav 文件的 base64 字符串。
-
-#### MOSS-SoundEffect
-
-```bash
-curl -X POST http://localhost:30000/generate \
-  -H "Content-Type: application/json" \
-  -d '{
-    "text": "${token:125}${ambient_sound:a sports car roaring past on the highway.}",
-    "sampling_params": {
-      "max_new_tokens": 512,
-      "temperature": 1.5,
-      "top_p": 0.6,
-      "top_k": 50
-    }
-  }'
-```
-
-- `text` 中只能包含 `${token:125}` 和 `${ambient_sound:...}` 这两个字段，其中 `${ambient_sound:...}` 后填写音效的文字描述。
-- 对于 MOSS-SoundEffect，建议使用 `${token:125}`，生成会更稳定。
-- 不要传 `audio_data`，否则模型可能会 OOD。
-
-#### 返回
-
-```json
-{"text": "<wav-base64>", "...": "..."}
-```
-
-HTTP 响应为 JSON 对象，可能包含多个字段；其中 `.text` 字段存放生成音频的 wav base64 字符串。通常只需提取该字段并做 base64 解码；例如将响应保存为 `response.json` 后，可执行 `jq -r '.text' response.json | base64 -d -i > output.wav`。
+安装和使用请参考：
+- **Recipe 与部署配置**：[`recipes/OpenMOSS/MOSS-TTS.md`](https://github.com/vllm-project/vllm-omni/blob/main/recipes/OpenMOSS/MOSS-TTS.md)
+- **离线推理示例**：[`examples/offline_inference/text_to_speech/moss_tts/`](https://github.com/vllm-project/vllm-omni/tree/main/examples/offline_inference/text_to_speech/moss_tts)
+- **MOSS-TTS-Nano 示例**：[`examples/offline_inference/text_to_speech/moss_tts_nano/`](https://github.com/vllm-project/vllm-omni/tree/main/examples/offline_inference/text_to_speech/moss_tts_nano)
 
 <a id="evaluation"></a>
 ## 评测
