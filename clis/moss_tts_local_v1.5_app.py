@@ -1846,7 +1846,7 @@ pollRuntime();
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run the MOSS-TTS Local v1.5 realtime streaming app.")
-    parser.add_argument("--host", default=os.environ.get("HOST", "0.0.0.0"))
+    parser.add_argument("--host", default=os.environ.get("HOST", "127.0.0.1"))
     parser.add_argument("--port", type=int, default=int(os.environ.get("PORT", "7861")))
     parser.add_argument("--model-dir", default=os.environ.get("MODEL_DIR", str(DEFAULT_MODEL_DIR)))
     parser.add_argument("--codec-dir", default=os.environ.get("CODEC_DIR", str(DEFAULT_CODEC_DIR)))
