@@ -24,6 +24,7 @@ import torch
 import torchaudio
 
 _ORIG_TORCHAUDIO_LOAD = torchaudio.load
+_ORIG_TORCHAUDIO_SAVE = torchaudio.save
 
 
 def _load_audio_with_soundfile_fallback(
@@ -73,7 +74,51 @@ def _load_audio_with_soundfile_fallback(
         return wav, sample_rate
 
 
+def _save_audio_with_soundfile_fallback(
+    filepath,
+    src,
+    sample_rate,
+    channels_first=True,
+    compression=None,
+    format=None,
+    encoding=None,
+    bits_per_sample=None,
+    buffer_size=4096,
+    backend=None,
+):
+    try:
+        _ORIG_TORCHAUDIO_SAVE(
+            filepath,
+            src,
+            sample_rate,
+            channels_first=channels_first,
+            compression=compression,
+            format=format,
+            encoding=encoding,
+            bits_per_sample=bits_per_sample,
+            buffer_size=buffer_size,
+            backend=backend,
+        )
+    except RuntimeError as exc:
+        if "Could not load libtorchcodec" not in str(exc):
+            raise
+
+        try:
+            import soundfile as sf
+        except ImportError as sf_exc:
+            raise RuntimeError(
+                "torchaudio 无法加载 TorchCodec，且当前环境未安装 soundfile。"
+                "请安装兼容的 FFmpeg/TorchCodec，或运行：pip install soundfile"
+            ) from sf_exc
+
+        wav = src.cpu().numpy()
+        if channels_first:
+            wav = wav.T
+        sf.write(os.fspath(filepath), wav, sample_rate)
+
+
 torchaudio.load = _load_audio_with_soundfile_fallback
+torchaudio.save = _save_audio_with_soundfile_fallback
 import uvicorn
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
