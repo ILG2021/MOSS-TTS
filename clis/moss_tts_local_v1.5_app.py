@@ -981,78 +981,78 @@ INDEX_HTML = r"""
 <body>
   <div class="page">
     <div class="app-card">
-      <div class="app-title">MOSS-TTS Local v1.5 Realtime Streaming</div>
-      <div class="app-subtitle">Realtime streaming decode with Direct Generation, Clone, Continuation, Continuation + Clone, and language tags</div>
+      <div class="app-title">TTS 实时语音合成</div>
+      <div class="app-subtitle">支持直接生成、声音克隆、续写、续写 + 克隆以及语言标签的实时流式解码</div>
     </div>
 
     <div class="layout">
       <div class="stack">
         <div class="panel">
-          <label for="text">Text</label>
-          <textarea id="text" placeholder="Enter text to synthesize or continue after the reference audio."></textarea>
+          <label for="text">合成文本</label>
+          <textarea id="text" placeholder="输入要合成的文本，或输入参考音频之后要续写的内容。"></textarea>
         </div>
 
         <div class="panel">
-          <label>Reference Audio (Optional)</label>
+          <label>参考音频（可选）</label>
           <div id="reference-drop-zone" class="drop-zone">
             <input id="prompt-audio" type="file" accept="audio/*,.wav,.mp3,.flac,.m4a,.ogg,.opus,.aac">
-            <div class="drop-copy">Drop audio here<br>or<br>click to upload</div>
+            <div class="drop-copy">将音频拖放到此处<br>或<br>点击上传</div>
             <audio id="reference-audio-preview" class="reference-preview hidden" controls></audio>
           </div>
           <input id="example-audio-path" type="hidden" value="">
           <div id="reference-record-controls" class="reference-record-controls hidden">
-            <button id="reference-record-button" class="record-button" type="button"><span class="record-dot"></span><span id="reference-record-button-label">Start Recording</span></button>
-            <span id="reference-record-status" class="record-status">Ready to record.</span>
+            <button id="reference-record-button" class="record-button" type="button"><span class="record-dot"></span><span id="reference-record-button-label">开始录音</span></button>
+            <span id="reference-record-status" class="record-status">准备录音。</span>
           </div>
           <div class="reference-action-row">
             <div class="reference-source-row">
-              <div class="reference-source-toggle" role="group" aria-label="Reference audio source">
-                <button id="reference-source-upload" class="reference-source-button active" type="button" aria-pressed="true" title="Upload">
+              <div class="reference-source-toggle" role="group" aria-label="参考音频来源">
+                <button id="reference-source-upload" class="reference-source-button active" type="button" aria-pressed="true" title="上传">
                   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4"></path><path d="M7 9l5-5 5 5"></path><path d="M5 20h14"></path></svg>
-                  <span>Upload</span>
+                  <span>上传</span>
                 </button>
-                <button id="reference-source-record" class="reference-source-button" type="button" aria-pressed="false" title="Record">
+                <button id="reference-source-record" class="reference-source-button" type="button" aria-pressed="false" title="录音">
                   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 14a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v5a3 3 0 0 0 3 3z"></path><path d="M19 11a7 7 0 0 1-14 0"></path><path d="M12 18v3"></path><path d="M8 21h8"></path></svg>
-                  <span>Record</span>
+                  <span>录音</span>
                 </button>
               </div>
             </div>
-            <button id="clear-reference" class="secondary small-button" type="button">Clear Reference Audio</button>
+            <button id="clear-reference" class="secondary small-button" type="button">清除参考音频</button>
           </div>
-          <div id="selected-reference" class="selected-reference">No reference selected.</div>
+          <div id="selected-reference" class="selected-reference">未选择参考音频。</div>
         </div>
 
         <div class="panel">
-          <label>Mode with Reference Audio</label>
-          <div class="hint">If no reference audio is uploaded, Direct Generation will be used automatically.</div>
+          <label>参考音频模式</label>
+          <div class="hint">如果未上传参考音频，将自动使用直接生成模式。</div>
           <div class="radio-row" style="margin-top: 10px;">
-            <label class="radio-pill"><input type="radio" name="mode" value="voice_clone" checked> Clone</label>
-            <label class="radio-pill"><input type="radio" name="mode" value="continuation"> Continuation</label>
-            <label class="radio-pill"><input type="radio" name="mode" value="continuation_clone"> Continuation + Clone</label>
+            <label class="radio-pill"><input type="radio" name="mode" value="voice_clone" checked> 声音克隆</label>
+            <label class="radio-pill"><input type="radio" name="mode" value="continuation"> 续写</label>
+            <label class="radio-pill"><input type="radio" name="mode" value="continuation_clone"> 续写 + 克隆</label>
           </div>
         </div>
         <div id="mode-hint" class="mode-hint"></div>
 
         <div id="reference-transcript-panel" class="panel hidden">
-          <label for="prompt-text">Reference Audio Transcript</label>
-          <div class="hint">Required for Continuation modes. Enter the transcript corresponding to the reference audio.</div>
-          <textarea id="prompt-text" class="small-textarea" placeholder="Transcript of the reference audio."></textarea>
+          <label for="prompt-text">参考音频文本</label>
+          <div class="hint">续写模式必填。请输入与参考音频对应的文本。</div>
+          <textarea id="prompt-text" class="small-textarea" placeholder="输入参考音频的文本内容。"></textarea>
         </div>
 
         <div class="panel">
-          <label for="language">Language Tag</label>
-          <div class="hint">Optional for v1.5. Set this when the input language is known, especially outside Chinese and English.</div>
+          <label for="language">语言标签</label>
+          <div class="hint">v1.5 中为可选项。已知输入语言时建议设置，尤其是中文和英文以外的语言。</div>
           <select id="language"></select>
-          <label style="margin-top: 14px;"><input id="tokens-control" type="checkbox"> Enable Duration Control (Expected Audio Tokens)</label>
+          <label style="margin-top: 14px;"><input id="tokens-control" type="checkbox"> 启用时长控制（预计音频 Token 数）</label>
           <div id="tokens-wrap" class="hidden" style="margin-top: 10px;">
             <label for="tokens">expected_tokens</label>
             <input id="tokens" type="number" min="1" step="1" value="1">
           </div>
         </div>
-        <div id="duration-hint" class="hint">Duration control is disabled.</div>
+        <div id="duration-hint" class="hint">时长控制已禁用。</div>
 
         <details class="accordion" open>
-          <summary>Sampling Parameters (Audio)</summary>
+          <summary>采样参数（音频）</summary>
           <div class="accordion-body">
             <div class="control-row" data-pair="temperature">
               <div>
@@ -1096,14 +1096,14 @@ INDEX_HTML = r"""
             </div>
             <div class="control-row" data-pair="codec-chunk-frames">
               <div>
-                <div class="range-label">Codec Chunk Frames (0=auto)</div>
+                <div class="range-label">编解码器分块帧数（0=自动）</div>
                 <input id="codec-chunk-frames-range" type="range" min="0" max="32" step="1" value="8">
                 <div class="range-minmax"><span>0</span><span>32</span></div>
               </div>
               <input id="codec-chunk-frames" type="number" min="0" max="32" step="1" value="8">
             </div>
             <div class="control-row">
-              <label for="initial-playback-delay">Initial Playback Delay (s)</label>
+              <label for="initial-playback-delay">初始播放延迟（秒）</label>
               <input id="initial-playback-delay" type="number" min="0" max="2" step="0.01" value="0.08">
             </div>
             <div class="control-row" data-pair="seed">
@@ -1114,35 +1114,35 @@ INDEX_HTML = r"""
               </div>
               <input id="seed" type="number" min="-1" step="1" value="__DEFAULT_SEED__">
             </div>
-            <label style="margin-top: 14px;"><input id="streaming-generation" type="checkbox" checked> Enable Streaming Generation</label>
+            <label style="margin-top: 14px;"><input id="streaming-generation" type="checkbox" checked> 启用流式生成</label>
           </div>
         </details>
 
         <div class="button-row">
-          <button id="start" class="primary" type="button">Generate Speech</button>
-          <button id="pause" class="secondary" type="button" disabled>Pause Playback</button>
-          <button id="stop" class="secondary" type="button">Close Job</button>
+          <button id="start" class="primary" type="button">生成语音</button>
+          <button id="pause" class="secondary" type="button" disabled>暂停播放</button>
+          <button id="stop" class="secondary" type="button">关闭任务</button>
         </div>
       </div>
 
       <div class="stack">
         <div class="panel audio-panel">
-          <label>Output Audio</label>
+          <label>输出音频</label>
           <audio id="audio-output" controls disabled></audio>
-          <a id="download" class="download" href="#">Download final wav</a>
+          <a id="download" class="download" href="#">下载最终 WAV</a>
         </div>
         <div class="panel">
-          <label>Status</label>
-          <div id="runtime-summary" class="summary">Runtime: checking...</div>
+          <label>状态</label>
+          <div id="runtime-summary" class="summary">运行状态：检查中...</div>
           <div id="summary" class="summary"></div>
           <div class="meter"><div id="bar"></div></div>
           <div id="status" class="status-box">idle</div>
         </div>
         <div class="panel">
-          <label>Examples (click a row to fill inputs)</label>
+          <label>示例（点击行以填充输入）</label>
           <div class="examples-wrap">
             <table>
-              <thead><tr><th>Reference Speech</th><th>Example Text</th></tr></thead>
+              <thead><tr><th>参考语音</th><th>示例文本</th></tr></thead>
               <tbody id="examples-body"></tbody>
             </table>
           </div>
@@ -1156,7 +1156,7 @@ const EXAMPLES = __EXAMPLES_JSON__;
 const LANGUAGES = __LANGUAGES_JSON__;
 const INITIAL_RUNTIME = __RUNTIME_JSON__;
 const DEFAULT_TEXT = __DEFAULT_TEXT__;
-const CONTINUATION_NOTICE = "Continuation mode is active. Fill Reference Audio Transcript with the transcript of the reference audio.";
+const CONTINUATION_NOTICE = "续写模式已启用。请在“参考音频文本”中填写参考音频的文本。";
 
 let currentJob = null;
 let audioContext = null;
@@ -1211,7 +1211,7 @@ function hasReference() {
   return Boolean(field("prompt-audio").files[0] || recordedReferenceFile || field("example-audio-path").value);
 }
 function setStatus(obj) {
-  field("status").textContent = typeof obj === "string" ? obj : JSON.stringify(obj, null, 2);
+  // field("status").textContent = typeof obj === "string" ? obj : JSON.stringify(obj, null, 2);
   if (obj && (obj.generated_frames || obj.generated_frames === 0) && obj.max_new_tokens) {
     const pct = Math.min(100, 100 * Number(obj.generated_frames || 0) / Number(obj.max_new_tokens || 1));
     field("bar").style.width = pct.toFixed(1) + "%";
@@ -1243,13 +1243,13 @@ function updateReferenceLabel() {
   const file = field("prompt-audio").files[0];
   const examplePath = field("example-audio-path").value;
   if (file) {
-    field("selected-reference").textContent = `Uploaded reference: ${file.name}`;
+    field("selected-reference").textContent = `已上传参考音频：${file.name}`;
   } else if (recordedReferenceFile) {
-    field("selected-reference").textContent = `Recorded reference: ${recordedReferenceFile.name}`;
+    field("selected-reference").textContent = `已录制参考音频：${recordedReferenceFile.name}`;
   } else if (examplePath) {
-    field("selected-reference").textContent = `Example reference: ${examplePath}`;
+    // field("selected-reference").textContent = `Example reference: ${examplePath}`;
   } else {
-    field("selected-reference").textContent = "No reference selected.";
+    field("selected-reference").textContent = "未选择参考音频。";
   }
   syncReferenceSourceControls();
   updateModeHint();
@@ -1314,7 +1314,7 @@ function setReferenceSourceMode(mode) {
   referenceSourceMode = nextMode;
   if (nextMode === "upload") {
     recordedReferenceFile = null;
-    field("reference-record-status").textContent = "Ready to record.";
+    field("reference-record-status").textContent = "准备录音。";
   } else {
     field("prompt-audio").value = "";
     field("example-audio-path").value = "";
@@ -1331,12 +1331,12 @@ function formatRecordingDuration(seconds) {
 function updateRecordButtonState() {
   const button = field("reference-record-button");
   button.classList.toggle("recording", referenceRecordingActive);
-  field("reference-record-button-label").textContent = referenceRecordingActive ? "Stop Recording" : "Start Recording";
+  field("reference-record-button-label").textContent = referenceRecordingActive ? "停止录音" : "开始录音";
 }
 function updateRecordingStatus() {
   if (!referenceRecordingActive) return;
   const elapsed = (Date.now() - referenceRecordingStartedAt) / 1000;
-  field("reference-record-status").textContent = `Recording ${formatRecordingDuration(elapsed)}`;
+  field("reference-record-status").textContent = `录音中 ${formatRecordingDuration(elapsed)}`;
 }
 function flattenRecordingChunks(chunks) {
   const length = chunks.reduce((total, chunk) => total + chunk.length, 0);
@@ -1438,18 +1438,18 @@ function stopReferenceRecording(discard = false) {
   cleanupReferenceRecordingNodes();
   updateRecordButtonState();
   if (discard) {
-    field("reference-record-status").textContent = "Ready to record.";
+    field("reference-record-status").textContent = "准备录音。";
     return;
   }
   if (!chunks.length) {
-    field("reference-record-status").textContent = "No audio captured.";
+    field("reference-record-status").textContent = "未录制到音频。";
     return;
   }
   const samples = flattenRecordingChunks(chunks);
   const wavBuffer = encodeWavPcm16(samples, referenceRecordingSampleRate);
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
   recordedReferenceFile = new File([wavBuffer], `recorded_reference_${stamp}.wav`, { type: "audio/wav" });
-  field("reference-record-status").textContent = `Recorded ${formatRecordingDuration(samples.length / referenceRecordingSampleRate)}`;
+  field("reference-record-status").textContent = `已录制 ${formatRecordingDuration(samples.length / referenceRecordingSampleRate)}`;
   updateReferencePreview();
   updateReferenceLabel();
 }
@@ -1479,11 +1479,11 @@ function updateModeHint() {
   const continuationMode = selectedMode() === "continuation" || selectedMode() === "continuation_clone";
   field("reference-transcript-panel").classList.toggle("hidden", !continuationMode);
   if (!hasReference()) {
-    field("mode-hint").innerHTML = "Current mode: <b>Direct Generation</b> (no reference audio uploaded)";
+    field("mode-hint").innerHTML = "当前模式：<b>直接生成</b>（未上传参考音频）";
   } else if (selectedMode() === "voice_clone") {
-    field("mode-hint").innerHTML = "Current mode: <b>Clone</b> (speaker timbre will be cloned from the reference audio)";
+    field("mode-hint").innerHTML = "当前模式：<b>声音克隆</b>（将从参考音频中克隆说话人的音色）";
   } else {
-    field("mode-hint").innerHTML = `Current mode: <b>${selectedModeName()}</b><br><span class="hint">${CONTINUATION_NOTICE}</span>`;
+    field("mode-hint").innerHTML = `当前模式：<b>${selectedModeName()}</b><br><span class="hint">${CONTINUATION_NOTICE}</span>`;
   }
   updateDurationControls();
 }
@@ -1503,13 +1503,13 @@ function updateDurationControls() {
     checkbox.checked = false;
     checkbox.disabled = true;
     wrap.classList.add("hidden");
-    field("duration-hint").textContent = "Duration control is disabled for Continuation modes.";
+    field("duration-hint").textContent = "续写模式不支持时长控制。";
     return;
   }
   checkbox.disabled = false;
   if (!checkbox.checked) {
     wrap.classList.add("hidden");
-    field("duration-hint").textContent = "Duration control is disabled.";
+    field("duration-hint").textContent = "时长控制已禁用。";
     return;
   }
   const text = field("text").value || "";
@@ -1523,7 +1523,7 @@ function updateDurationControls() {
   field("tokens").max = String(maxTokens);
   field("tokens").value = String(current);
   wrap.classList.remove("hidden");
-  field("duration-hint").textContent = `Duration control enabled | detected language: ${lang === "zh" ? "Chinese" : "English"} | default=${defaultTokens}, range=[${minTokens}, ${maxTokens}]`;
+  field("duration-hint").textContent = `时长控制已启用｜检测语言：${lang === "zh" ? "中文" : "英文"}｜默认=${defaultTokens}，范围=[${minTokens}, ${maxTokens}]`;
 }
 function renderExamples() {
   const tbody = field("examples-body");
@@ -1548,7 +1548,7 @@ function renderExamples() {
       updateReferencePreview();
       updateReferenceLabel();
       updateDurationControls();
-      setStatus(`Example selected: ${example.role}`);
+      setStatus(`已选择示例：${example.role}`);
     };
     tbody.appendChild(tr);
   }
@@ -1556,10 +1556,11 @@ function renderExamples() {
 function setupLanguages() {
   const select = field("language");
   select.innerHTML = "";
+  const languageNames = { "Auto (omit)": "自动（省略）", Chinese: "中文", Cantonese: "粤语", English: "英文", Arabic: "阿拉伯语", Czech: "捷克语", Danish: "丹麦语", Dutch: "荷兰语", Finnish: "芬兰语", French: "法语", German: "德语", Greek: "希腊语", Hebrew: "希伯来语", Hindi: "印地语", Hungarian: "匈牙利语", Italian: "意大利语", Japanese: "日语", Korean: "韩语", Macedonian: "马其顿语", Malay: "马来语", "Persian (Farsi)": "波斯语", Polish: "波兰语", Portuguese: "葡萄牙语", Romanian: "罗马尼亚语", Russian: "俄语", Spanish: "西班牙语", Swahili: "斯瓦希里语", Swedish: "瑞典语", Tagalog: "他加禄语", Thai: "泰语", Turkish: "土耳其语", Vietnamese: "越南语" };
   for (const language of LANGUAGES) {
     const option = document.createElement("option");
     option.value = language === "Auto (omit)" ? "" : language;
-    option.textContent = language;
+    option.textContent = languageNames[language] || language;
     select.appendChild(option);
   }
 }
@@ -1594,11 +1595,11 @@ function updatePauseButtonState() {
   const pauseBtn = field("pause");
   if (audioContext) {
     pauseBtn.disabled = false;
-    pauseBtn.textContent = playbackPaused ? "Resume Playback" : "Pause Playback";
+    pauseBtn.textContent = playbackPaused ? "继续播放" : "暂停播放";
     return;
   }
   pauseBtn.disabled = true;
-  pauseBtn.textContent = "Pause Playback";
+  pauseBtn.textContent = "暂停播放";
 }
 function resolveInitialPlaybackDelaySeconds() {
   const raw = Number(field("initial-playback-delay").value || 0.08);
@@ -1811,9 +1812,9 @@ field("start").onclick = async () => {
   if (file) form.append("prompt_audio", file);
   try {
     if ((selectedMode() === "continuation" || selectedMode() === "continuation_clone") && hasReference() && !field("prompt-text").value.trim()) {
-      throw new Error("Reference Audio Transcript is required for Continuation modes.");
+      throw new Error("续写模式必须填写参考音频文本。");
     }
-    setStatus("starting...");
+    setStatus("正在启动...");
     const response = await fetch(apiUrl("api/generate-stream/start"), { method: "POST", body: form });
     if (!response.ok) throw new Error(await response.text());
     const start = await response.json();
