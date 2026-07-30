@@ -520,7 +520,7 @@ def create_app(
     @app.get("/", response_class=HTMLResponse)
     async def index() -> HTMLResponse:
         defaults = {
-            "text": "欢迎关注模思智能、上海创智学院与复旦大学自然语言处理实验室。",
+            "text": "欢迎测试新版tts",
             "max_new_tokens": DEFAULT_MAX_NEW_TOKENS,
             "seed": 1234,
         }
@@ -1893,7 +1893,7 @@ pollRuntime();
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run the MOSS-TTS Local v1.5 realtime streaming app.")
     parser.add_argument("--host", default=os.environ.get("HOST", "127.0.0.1"))
-    parser.add_argument("--port", type=int, default=int(os.environ.get("PORT", "7861")))
+    parser.add_argument("--port", type=int, default=int(os.environ.get("PORT", "7860")))
     parser.add_argument("--model-dir", default=os.environ.get("MODEL_DIR", str(DEFAULT_MODEL_DIR)))
     parser.add_argument("--codec-dir", default=os.environ.get("CODEC_DIR", str(DEFAULT_CODEC_DIR)))
     parser.add_argument("--output-dir", default=os.environ.get("OUTPUT_DIR", str(DEFAULT_OUTPUT_DIR)))
