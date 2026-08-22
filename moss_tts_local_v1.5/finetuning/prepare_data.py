@@ -48,7 +48,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--batch-size",
         type=int,
-        default=1,
+        default=8,
         help="Audio files encoded per batch. Lower this to reduce GPU memory usage (default: 1).",
     )
     parser.add_argument(
