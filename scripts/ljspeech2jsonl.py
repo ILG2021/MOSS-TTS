@@ -111,7 +111,7 @@ def read_records(args: argparse.Namespace) -> list[dict[str, str]]:
 
     for input_name in args.input:
         input_path = Path(input_name)
-        audio_root = common_audio_root or input_path.parent.resolve()
+        audio_root = common_audio_root or input_path.parent.resolve() / "wavs"
 
         with input_path.open("r", encoding="utf-8-sig") as f:
             for line_number, raw_line in enumerate(f, start=1):
