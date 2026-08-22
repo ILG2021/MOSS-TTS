@@ -8,6 +8,11 @@ Examples:
         --output train_raw.jsonl ^
         --language zh
 
+    python scripts/ljspeech2jsonl.py ^
+        --input dataset_a/metadata.txt dataset_b/metadata.txt ^
+        --output train_raw.jsonl ^
+        --language zh
+
 Input lines are expected to look like:
     2025-01-25/2025-01-25_80.wav|哎，当然呢，
 
@@ -29,9 +34,15 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Convert LJSpeech-style metadata to MossTTSLocal JSONL."
     )
-    parser.add_argument("--input", required=True, help="Input metadata file.")
+    parser.add_argument(
+        "--input",
+        nargs="+",
+        required=True,
+        metavar="METADATA",
+        help="One or more input metadata files. Records are concatenated in order.",
+    )
     parser.add_argument("--output", required=True, help="Output JSONL file.")
-    parser.add_argument("--language", default="zh", help="Language tag written to each record.")
+    parser.add_argument("--language", default="Chinese", help="Language tag written to each record.")
     parser.add_argument(
         "--separator",
         default="|",
@@ -96,38 +107,41 @@ def normalize_path(path_text: str, audio_root: Path) -> str:
 
 def read_records(args: argparse.Namespace) -> list[dict[str, str]]:
     records: list[dict[str, str]] = []
-    input_path = Path(args.input)
-    audio_root = Path(args.audio_root).resolve() if args.audio_root else input_path.parent.resolve()
+    common_audio_root = Path(args.audio_root).resolve() if args.audio_root else None
 
-    with input_path.open("r", encoding="utf-8-sig") as f:
-        for line_number, raw_line in enumerate(f, start=1):
-            line = raw_line.strip()
-            if not line:
-                continue
+    for input_name in args.input:
+        input_path = Path(input_name)
+        audio_root = common_audio_root or input_path.parent.resolve()
 
-            columns = line.split(args.separator)
-            needed_index = max(args.audio_column, args.text_column)
-            if len(columns) <= needed_index:
-                raise ValueError(
-                    f"Line {line_number} has {len(columns)} columns, "
-                    f"but column {needed_index} is required: {line!r}"
+        with input_path.open("r", encoding="utf-8-sig") as f:
+            for line_number, raw_line in enumerate(f, start=1):
+                line = raw_line.strip()
+                if not line:
+                    continue
+
+                columns = line.split(args.separator)
+                needed_index = max(args.audio_column, args.text_column)
+                if len(columns) <= needed_index:
+                    raise ValueError(
+                        f"{input_path}:{line_number} has {len(columns)} columns, "
+                        f"but column {needed_index} is required: {line!r}"
+                    )
+
+                audio = normalize_path(columns[args.audio_column], audio_root)
+                text = columns[args.text_column].strip()
+                if not audio or not text:
+                    continue
+
+                if args.skip_missing and not Path(audio).exists():
+                    continue
+
+                records.append(
+                    {
+                        "audio": audio,
+                        "text": text,
+                        "language": args.language,
+                    }
                 )
-
-            audio = normalize_path(columns[args.audio_column], audio_root)
-            text = columns[args.text_column].strip()
-            if not audio or not text:
-                continue
-
-            if args.skip_missing and not Path(audio).exists():
-                continue
-
-            records.append(
-                {
-                    "audio": audio,
-                    "text": text,
-                    "language": args.language,
-                }
-            )
 
     return records
 
