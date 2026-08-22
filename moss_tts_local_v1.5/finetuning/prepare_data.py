@@ -40,7 +40,17 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--input-jsonl", type=str, required=True)
     parser.add_argument("--output-jsonl", type=str, required=True)
-    parser.add_argument("--batch-size", type=int, default=8)
+    parser.add_argument(
+        "--skip-missing",
+        action="store_true",
+        help="Skip records whose target audio file does not exist instead of failing.",
+    )
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=1,
+        help="Audio files encoded per batch. Lower this to reduce GPU memory usage (default: 1).",
+    )
     parser.add_argument(
         "--n-vq",
         type=int,
@@ -219,6 +229,29 @@ def collect_reference_paths(records: List[Dict[str, Any]]) -> List[str]:
     return list(dict.fromkeys(unique_paths))
 
 
+def validate_audio_paths(paths: List[str], *, field_name: str) -> None:
+    missing = [path for path in paths if not Path(path).is_file()]
+    if missing:
+        preview = "\n".join(f"  - {path}" for path in missing[:20])
+        suffix = f"\n  ... and {len(missing) - 20} more" if len(missing) > 20 else ""
+        raise FileNotFoundError(
+            f"Missing {field_name} audio files ({len(missing)}):\n{preview}{suffix}"
+        )
+
+
+def filter_missing_target_records(records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    kept: List[Dict[str, Any]] = []
+    skipped = 0
+    for record in records:
+        audio_path = record.get("audio")
+        if isinstance(audio_path, str) and audio_path and Path(audio_path).is_file():
+            kept.append(record)
+        else:
+            skipped += 1
+    print(f"Skipped {skipped} records with missing target audio.")
+    return kept
+
+
 def attach_reference_audio_codes(
     records: List[Dict[str, Any]],
     path_to_codes: Dict[str, List[List[int]]],
@@ -268,6 +301,19 @@ def main() -> None:
         raise ValueError(
             f"No records found for shard rank={rank} / world_size={world_size} in {input_jsonl_path}."
         )
+
+    # Check paths before loading the large codec model, so missing files are
+    # either filtered explicitly or reported immediately.
+    if args.skip_missing:
+        records = filter_missing_target_records(records)
+        if not records:
+            raise ValueError("No records remain after skipping missing target audio files.")
+    target_paths_for_validation = collect_paths(records, "audio")
+    validate_audio_paths(target_paths_for_validation, field_name="target")
+    reference_paths_for_validation = (
+        collect_reference_paths(records) if args.encode_reference_audio else []
+    )
+    validate_audio_paths(reference_paths_for_validation, field_name="reference")
 
     processor, codec_attn_implementation = build_processor(args, device=device)
 
