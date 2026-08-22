@@ -205,7 +205,11 @@ def batch_encode(
     all_codes: List[torch.Tensor] = []
     for start in tqdm(range(0, len(paths), batch_size), desc=desc):
         batch_paths = paths[start : start + batch_size]
-        all_codes.extend(processor.encode_audios_from_path(batch_paths, n_vq=n_vq))
+        # The codec returns tensors on the inference device. Move each result
+        # to CPU immediately; otherwise `all_codes` keeps every sample alive
+        # on the GPU and VRAM grows throughout the conversion.
+        batch_codes = processor.encode_audios_from_path(batch_paths, n_vq=n_vq)
+        all_codes.extend(code.detach().cpu() for code in batch_codes)
     return all_codes
 
 
