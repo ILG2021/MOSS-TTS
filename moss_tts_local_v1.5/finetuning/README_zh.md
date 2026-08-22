@@ -161,7 +161,39 @@ accelerate launch moss_tts_local_v1.5/finetuning/sft.py \
     --gradient-checkpointing
 ```
 
-### 4.2 数据并行
+### 4.2 Windows 单卡 LoRA
+
+LoRA 训练需要额外安装 PEFT：
+
+```powershell
+python -m pip install peft
+```
+
+在 Windows PowerShell 中，使用反引号 `` ` `` 续行。反引号必须是每行的最后一个
+字符，后面不能有空格。
+
+```powershell
+accelerate launch moss_tts_local_v1.5/finetuning/sft_lora.py `
+    --model-path OpenMOSS-Team/MOSS-TTS-Local-Transformer-v1.5 `
+    --train-jsonl train_with_codes.jsonl `
+    --output-dir output/moss_tts_local_v1_5_lora `
+    --per-device-batch-size 1 `
+    --gradient-accumulation-steps 8 `
+    --learning-rate 1e-4 `
+    --num-epochs 3 `
+    --mixed-precision bf16 `
+    --gradient-checkpointing `
+    --gradient-checkpointing-scope all `
+    --lora-r 16 `
+    --lora-alpha 32 `
+    --lora-dropout 0.05
+```
+
+`sft_lora.py` 固定同时为全局 Qwen3 Transformer 和局部 GPT-2 Transformer
+添加 LoRA，并默认使用标准 PyTorch `AdamW`。checkpoint 只保存 PEFT adapter，
+基础模型仍由 `--model-path` 指定。
+
+### 4.3 数据并行
 
 单机 8 卡数据并行可直接使用模板：
 
@@ -184,7 +216,7 @@ accelerate launch \
     --gradient-checkpointing
 ```
 
-### 4.3 可选 DeepSpeed ZeRO-3 训练
+### 4.4 可选 DeepSpeed ZeRO-3 训练
 
 v1.5 SFT 路径支持 DDP 和 DeepSpeed ZeRO-3。
 
@@ -209,7 +241,7 @@ accelerate launch \
 
 ZeRO-3 需要 `deepspeed` 包；如果只使用单卡或 DDP，则不需要额外安装它。
 
-### 4.4 常用可调超参数
+### 4.5 常用可调超参数
 
 `sft.py` 将常见训练超参数都直接开放出来：
 
@@ -234,7 +266,7 @@ ZeRO-3 需要 `deepspeed` 包；如果只使用单卡或 DDP，则不需要额�
 - `samples_per_sec`
 - `eta`
 
-### 4.5 多机训练
+### 4.6 多机训练
 
 将配置文件里的以下字段改成你的集群值即可：
 
