@@ -293,6 +293,8 @@ class RuntimeManager:
         self,
         *,
         model_dir: str,
+        lora_dir: str | None,
+        merge_lora: bool,
         codec_dir: str,
         device: str,
         tts_device: str,
@@ -304,6 +306,8 @@ class RuntimeManager:
         warmup: bool,
     ) -> None:
         self.model_dir = str(model_dir)
+        self.lora_dir = str(lora_dir).strip() if lora_dir else None
+        self.merge_lora = bool(merge_lora)
         self.codec_dir = str(codec_dir)
         self.device = device
         self.tts_device = tts_device
@@ -348,6 +352,11 @@ class RuntimeManager:
             "ready_at": ready_at,
             "load_elapsed_seconds": elapsed,
             "model_dir": self.model_dir,
+            "lora_dir": self.lora_dir,
+            "merge_lora": self.merge_lora,
+            "lora_merged": (
+                False if self._runtime is None else self._runtime.lora_merged
+            ),
             "codec_dir": self.codec_dir,
             "device": self.device,
             "tts_device": self.tts_device,
@@ -392,6 +401,8 @@ class RuntimeManager:
                 try:
                     self._runtime = load_runtime(
                         model_dir=self.model_dir,
+                        lora_dir=self.lora_dir,
+                        merge_lora=self.merge_lora,
                         codec_dir=self.codec_dir,
                         device=self.device,
                         tts_device=self.tts_device,
@@ -478,6 +489,8 @@ class StreamingJobManager:
 def create_app(
     *,
     model_dir: str,
+    lora_dir: str | None = None,
+    merge_lora: bool = True,
     codec_dir: str,
     output_dir: str | Path = DEFAULT_OUTPUT_DIR,
     upload_dir: str | Path = DEFAULT_UPLOAD_DIR,
@@ -493,6 +506,8 @@ def create_app(
 ) -> FastAPI:
     runtime_manager = RuntimeManager(
         model_dir=str(model_dir),
+        lora_dir=lora_dir,
+        merge_lora=merge_lora,
         codec_dir=str(codec_dir),
         device=device,
         tts_device=tts_device,
@@ -775,6 +790,8 @@ def create_app(
         return JSONResponse(
             {
                 "model_dir": str(model_dir),
+                "lora_dir": None if not lora_dir else str(lora_dir),
+                "merge_lora": bool(merge_lora),
                 "codec_dir": str(codec_dir),
                 "output_dir": str(output_dir),
                 "upload_dir": str(upload_dir),
@@ -1895,6 +1912,17 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--host", default=os.environ.get("HOST", "127.0.0.1"))
     parser.add_argument("--port", type=int, default=int(os.environ.get("PORT", "7860")))
     parser.add_argument("--model-dir", default=os.environ.get("MODEL_DIR", str(DEFAULT_MODEL_DIR)))
+    parser.add_argument(
+        "--lora-dir",
+        default=os.environ.get("LORA_DIR", ""),
+        help="Optional PEFT LoRA adapter directory or Hugging Face repo ID.",
+    )
+    parser.add_argument(
+        "--merge-lora",
+        action=argparse.BooleanOptionalAction,
+        default=os.environ.get("MERGE_LORA", "1").strip().lower() not in {"0", "false", "no", "off"},
+        help="Merge the LoRA adapter into the base model after loading (default: enabled).",
+    )
     parser.add_argument("--codec-dir", default=os.environ.get("CODEC_DIR", str(DEFAULT_CODEC_DIR)))
     parser.add_argument("--output-dir", default=os.environ.get("OUTPUT_DIR", str(DEFAULT_OUTPUT_DIR)))
     parser.add_argument("--upload-dir", default=os.environ.get("UPLOAD_DIR", str(DEFAULT_UPLOAD_DIR)))
@@ -1924,6 +1952,8 @@ def main() -> None:
     args = _parse_args()
     app = create_app(
         model_dir=args.model_dir,
+        lora_dir=args.lora_dir or None,
+        merge_lora=args.merge_lora,
         codec_dir=args.codec_dir,
         output_dir=args.output_dir,
         upload_dir=args.upload_dir,

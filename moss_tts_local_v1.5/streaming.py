@@ -52,6 +52,8 @@ class StreamingRuntime:
     codec_device: torch.device
     dtype: torch.dtype
     model_dir: str | Path
+    lora_dir: str | Path | None
+    lora_merged: bool
     codec_dir: str | Path
     sample_rate: int
     frame_rate: float
@@ -175,6 +177,8 @@ def _move_batch_to_device(batch: Any, device: torch.device) -> dict[str, torch.T
 def load_runtime(
     *,
     model_dir: str | Path = DEFAULT_MODEL_DIR,
+    lora_dir: str | Path | None = None,
+    merge_lora: bool = True,
     codec_dir: str | Path = DEFAULT_CODEC_DIR,
     device: str | torch.device = "cuda",
     tts_device: str | torch.device | None = None,
@@ -186,6 +190,7 @@ def load_runtime(
     warmup: bool = True,
 ) -> StreamingRuntime:
     model_ref = str(model_dir)
+    lora_ref = str(lora_dir).strip() if lora_dir is not None else ""
     codec_ref = str(codec_dir)
     local_model_path = Path(model_ref)
     local_files_only = local_model_path.exists()
@@ -215,6 +220,24 @@ def load_runtime(
         local_files_only=local_files_only,
         attn_implementation=resolved_attn_implementation,
     )
+    lora_merged = False
+    if lora_ref:
+        try:
+            from peft import PeftModel
+        except ImportError as exc:
+            raise ImportError(
+                "LoRA inference requires PEFT. Install it with `python -m pip install peft`."
+            ) from exc
+
+        model = PeftModel.from_pretrained(
+            model,
+            lora_ref,
+            is_trainable=False,
+        )
+        if merge_lora:
+            model = model.merge_and_unload()
+            lora_merged = True
+
     model.to(resolved_tts_device)
     model.eval()
 
@@ -239,6 +262,8 @@ def load_runtime(
         codec_device=resolved_codec_device,
         dtype=resolved_dtype,
         model_dir=model_ref,
+        lora_dir=lora_ref or None,
+        lora_merged=lora_merged,
         codec_dir=codec_ref,
         sample_rate=sample_rate,
         frame_rate=float(sample_rate) / float(downsample_rate),
@@ -1032,6 +1057,13 @@ def synthesize_stream(
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="MOSS-TTS Local Transformer v1.5 streaming inference runner.")
     parser.add_argument("--model-dir", default=str(DEFAULT_MODEL_DIR))
+    parser.add_argument("--lora-dir", default="", help="Optional PEFT LoRA adapter directory or Hugging Face repo ID.")
+    parser.add_argument(
+        "--merge-lora",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Merge the LoRA adapter into the base model after loading (default: enabled).",
+    )
     parser.add_argument("--codec-dir", default=str(DEFAULT_CODEC_DIR))
     parser.add_argument("--output-dir", default=str(DEFAULT_OUTPUT_DIR))
     parser.add_argument("--text", default="这是一个流式推理测试。")
@@ -1084,6 +1116,8 @@ def main() -> None:
     args = _parse_args()
     runtime = load_runtime(
         model_dir=args.model_dir,
+        lora_dir=args.lora_dir or None,
+        merge_lora=args.merge_lora,
         codec_dir=args.codec_dir,
         device=args.device,
         tts_device=args.tts_device or args.device,

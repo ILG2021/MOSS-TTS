@@ -155,6 +155,19 @@ CODEC_WEIGHT_DTYPE=fp32 \
 bash moss_tts_local_v1.5/run_streaming_app.sh
 ```
 
+To load a PEFT LoRA adapter explicitly, keep `MODEL_DIR` pointed at the base
+model and set `LORA_DIR` to the adapter checkpoint:
+
+```bash
+MODEL_DIR=OpenMOSS-Team/MOSS-TTS-Local-Transformer-v1.5 \
+LORA_DIR=output/moss_tts_local_v1_5_lora/checkpoint-last \
+bash moss_tts_local_v1.5/run_streaming_app.sh
+```
+
+The adapter is merged into the base model by default. Set `MERGE_LORA=0` or
+pass `--no-merge-lora` to keep it attached as a PEFT adapter. LoRA inference
+requires `peft` (`python -m pip install peft`).
+
 The app defaults to `flash_attention_2`. If FlashAttention 2 is not available
 in the current environment, runtime loading falls back to `sdpa` on CUDA.
 The codec encoder/decoder weights default to `fp32`; pass

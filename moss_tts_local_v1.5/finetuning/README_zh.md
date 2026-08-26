@@ -193,6 +193,18 @@ accelerate launch moss_tts_local_v1.5/finetuning/sft_lora.py `
 添加 LoRA，并默认使用标准 PyTorch `AdamW`。checkpoint 只保存 PEFT adapter，
 基础模型仍由 `--model-path` 指定。
 
+训练完成后，可以直接运行流式 App，显式加载基础模型和 LoRA adapter：
+
+```powershell
+python .\clis\moss_tts_local_v1.5_app.py `
+    --model-dir "OpenMOSS-Team/MOSS-TTS-Local-Transformer-v1.5" `
+    --lora-dir "output\moss_tts_local_v1_5_lora\checkpoint-last" `
+    --port 7861
+```
+
+App 默认调用 `merge_and_unload()` 将 LoRA 合并到基础模型。若要保留 PEFT
+adapter 形式，增加 `--no-merge-lora`。运行环境必须安装 `peft`。
+
 ### 4.3 数据并行
 
 单机 8 卡数据并行可直接使用模板：
