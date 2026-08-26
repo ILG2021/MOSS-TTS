@@ -145,7 +145,7 @@ torch.backends.cuda.enable_mem_efficient_sdp(True)
 torch.backends.cuda.enable_math_sdp(True)
 
 DEFAULT_UPLOAD_DIR = Path("outputs/moss_tts_local_v1_5_uploads")
-DEFAULT_MAX_NEW_TOKENS = 7500
+DEFAULT_MAX_NEW_TOKENS = 750
 MODE_CLONE = "Clone"
 MODE_CONTINUE = "Continuation"
 MODE_CONTINUE_CLONE = "Continuation + Clone"
@@ -645,7 +645,7 @@ def create_app(
         top_p: float = Form(0.8),
         top_k: int = Form(25),
         repetition_penalty: float = Form(1.0),
-        streaming_generation: int = Form(1),
+        streaming_generation: int = Form(0),
         example_audio_path: str = Form(""),
         prompt_audio: UploadFile | None = File(None),
     ) -> JSONResponse:
@@ -692,7 +692,7 @@ def create_app(
             maximum=DEFAULT_MAX_NEW_TOKENS,
         )
         codec_chunk_frames = _safe_int(codec_chunk_frames, default=8, minimum=0, maximum=32)
-        streaming_generation_enabled = bool(_safe_int(streaming_generation, default=1, minimum=0, maximum=1))
+        streaming_generation_enabled = bool(_safe_int(streaming_generation, default=0, minimum=0, maximum=1))
         request = StreamingRequest(
             text=text,
             mode="continuation" if not prompt_audio_path or mode in {"continuation", "continuation_clone"} else "voice_clone",
@@ -1106,10 +1106,10 @@ INDEX_HTML = r"""
             <div class="control-row" data-pair="max-new-tokens">
               <div>
                 <div class="range-label">max_new_tokens</div>
-                <input id="max-new-tokens-range" type="range" min="1" max="7500" step="1" value="__DEFAULT_MAX_NEW_TOKENS__">
-                <div class="range-minmax"><span>1</span><span>7500</span></div>
+                <input id="max-new-tokens-range" type="range" min="1" max="__DEFAULT_MAX_NEW_TOKENS__" step="1" value="__DEFAULT_MAX_NEW_TOKENS__">
+                <div class="range-minmax"><span>1</span><span>__DEFAULT_MAX_NEW_TOKENS__</span></div>
               </div>
-              <input id="max-new-tokens" type="number" min="1" max="7500" step="1" value="__DEFAULT_MAX_NEW_TOKENS__">
+              <input id="max-new-tokens" type="number" min="1" max="__DEFAULT_MAX_NEW_TOKENS__" step="1" value="__DEFAULT_MAX_NEW_TOKENS__">
             </div>
             <div class="control-row" data-pair="codec-chunk-frames">
               <div>
@@ -1131,7 +1131,7 @@ INDEX_HTML = r"""
               </div>
               <input id="seed" type="number" min="-1" step="1" value="__DEFAULT_SEED__">
             </div>
-            <label style="margin-top: 14px;"><input id="streaming-generation" type="checkbox" checked> 启用流式生成</label>
+            <label style="margin-top: 14px;"><input id="streaming-generation" type="checkbox"> 启用流式生成</label>
           </div>
         </details>
 
@@ -1182,7 +1182,7 @@ let statusTimer = null;
 let runtimeReady = false;
 let generationActive = false;
 let currentStreamAbortController = null;
-let currentStreamingGenerationEnabled = true;
+let currentStreamingGenerationEnabled = false;
 let playbackPaused = false;
 let playbackCompletionTimer = null;
 let currentInitialPlaybackDelaySeconds = 0.08;
