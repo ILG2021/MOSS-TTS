@@ -1326,12 +1326,6 @@ INDEX_HTML = r"""
             <label style="margin-top: 14px;"><input id="streaming-generation" type="checkbox"> 启用流式生成</label>
           </div>
         </details>
-
-        <div class="button-row">
-          <button id="start" class="primary" type="button">生成语音</button>
-          <button id="pause" class="secondary" type="button" disabled>暂停播放</button>
-          <button id="stop" class="secondary" type="button">关闭任务</button>
-        </div>
       </div>
 
       <div class="stack">
@@ -1339,6 +1333,11 @@ INDEX_HTML = r"""
           <label>输出音频</label>
           <audio id="audio-output" controls disabled></audio>
           <a id="download" class="download" href="#">下载最终 WAV</a>
+        </div>
+        <div class="button-row">
+          <button id="start" class="primary" type="button">生成语音</button>
+          <button id="pause" class="secondary" type="button" disabled>暂停播放</button>
+          <button id="stop" class="secondary" type="button">关闭任务</button>
         </div>
         <div class="panel">
           <label>状态</label>
