@@ -276,6 +276,15 @@ def _decode_reference_path(path: str) -> str:
     return decoded
 
 
+def _unlink_quietly(path: Path | None) -> None:
+    if path is None:
+        return
+    try:
+        path.unlink(missing_ok=True)
+    except OSError:
+        logging.warning("failed to remove uploaded prompt audio: %s", path)
+
+
 def _pcm16le_bytes(waveform: torch.Tensor) -> bytes:
     if waveform.ndim == 1:
         waveform = waveform.unsqueeze(0)
@@ -440,14 +449,38 @@ class StreamingJob:
             "lead_seconds": 0.0,
             "error": None,
             "closed": False,
+            "queue_position": 0,
+            "updated_at": time.time(),
         }
         self.result: dict[str, Any] | None = None
         self.thread: threading.Thread | None = None
         self.is_closed = False
+        self.upload_path: Path | None = None
 
     def update(self, **kwargs: Any) -> None:
         with self.status_lock:
             self.status.update(kwargs)
+            self.status["updated_at"] = time.time()
+
+    def mark_closed(self, *, error: str | None = None) -> None:
+        """Terminate the job and wake anything blocked on its audio queue."""
+        with self.status_lock:
+            self.is_closed = True
+            self.status["closed"] = True
+            if self.status.get("state") not in {"finished", "error"}:
+                self.status["state"] = "error" if error else "closed"
+            if error:
+                self.status["error"] = error
+            self.status["updated_at"] = time.time()
+            try:
+                self.audio_queue.put_nowait(None)
+            except queue.Full:
+                pass
+
+    @property
+    def is_terminal(self) -> bool:
+        with self.status_lock:
+            return self.status.get("state") in {"finished", "error", "closed"}
 
     def snapshot(self) -> dict[str, Any]:
         with self.status_lock:
@@ -455,9 +488,10 @@ class StreamingJob:
 
 
 class StreamingJobManager:
-    def __init__(self) -> None:
+    def __init__(self, *, job_ttl_seconds: float = 900.0) -> None:
         self._jobs: dict[str, StreamingJob] = {}
         self._lock = threading.Lock()
+        self._job_ttl_seconds = float(job_ttl_seconds)
 
     def create(self) -> StreamingJob:
         job = StreamingJob(uuid.uuid4().hex)
@@ -474,16 +508,83 @@ class StreamingJobManager:
 
     def close(self, job_id: str) -> StreamingJob:
         job = self.get(job_id)
-        with job.status_lock:
-            job.is_closed = True
-            job.status["closed"] = True
-            if job.status.get("state") not in {"finished", "error"}:
-                job.status["state"] = "closed"
-            try:
-                job.audio_queue.put_nowait(None)
-            except queue.Full:
-                pass
+        job.mark_closed()
         return job
+
+    def reap(self) -> int:
+        """Drop terminal jobs that nobody polled for a while (multi-user memory leak)."""
+        if self._job_ttl_seconds <= 0:
+            return 0
+        cutoff = time.time() - self._job_ttl_seconds
+        removed = 0
+        with self._lock:
+            for job_id, job in list(self._jobs.items()):
+                snapshot = job.snapshot()
+                if snapshot.get("state") not in {"finished", "error", "closed"}:
+                    continue
+                if float(snapshot.get("updated_at") or 0.0) > cutoff:
+                    continue
+                self._jobs.pop(job_id, None)
+                removed += 1
+        return removed
+
+    def start_reaper(self, interval_seconds: float = 60.0) -> None:
+        if self._job_ttl_seconds <= 0:
+            return
+
+        def _loop() -> None:
+            while True:
+                time.sleep(max(5.0, float(interval_seconds)))
+                try:
+                    self.reap()
+                except Exception:  # noqa: BLE001
+                    logging.exception("stream job reaper failed")
+
+        threading.Thread(target=_loop, name="moss-tts-local-v1.5-job-reaper", daemon=True).start()
+
+
+class GenerationGate:
+    """Serialize GPU work.
+
+    The TTS model and, more importantly, the streaming codec decoder
+    (``processor.audio_tokenizer``) carry per-stream state on a single shared
+    instance. Running two synthesis jobs at once interleaves that state and
+    produces cross-talk / garbled audio, and ``torch.manual_seed`` is process
+    global as well. So only ``max_concurrency`` jobs may synthesize at a time
+    (1 unless you host one runtime per worker).
+    """
+
+    def __init__(self, max_concurrency: int = 1) -> None:
+        self.max_concurrency = max(1, int(max_concurrency))
+        self._semaphore = threading.BoundedSemaphore(self.max_concurrency)
+        self._lock = threading.Lock()
+        self._waiting: list[str] = []
+
+    def enter_queue(self, job_id: str) -> None:
+        with self._lock:
+            if job_id not in self._waiting:
+                self._waiting.append(job_id)
+
+    def leave_queue(self, job_id: str) -> None:
+        with self._lock:
+            if job_id in self._waiting:
+                self._waiting.remove(job_id)
+
+    def position(self, job_id: str) -> int:
+        with self._lock:
+            try:
+                return self._waiting.index(job_id) + 1
+            except ValueError:
+                return 0
+
+    def acquire(self, timeout: float = 0.25) -> bool:
+        return bool(self._semaphore.acquire(timeout=timeout))
+
+    def release(self) -> None:
+        try:
+            self._semaphore.release()
+        except ValueError:  # released more times than acquired
+            pass
 
 
 def create_app(
@@ -503,6 +604,9 @@ def create_app(
     codec_compute_dtype: str = "bf16",
     warmup: bool = True,
     preload: bool = True,
+    max_concurrency: int = 1,
+    job_ttl_seconds: float = 900.0,
+    stream_stall_timeout_seconds: float = 30.0,
 ) -> FastAPI:
     runtime_manager = RuntimeManager(
         model_dir=str(model_dir),
@@ -518,7 +622,8 @@ def create_app(
         codec_compute_dtype=codec_compute_dtype,
         warmup=warmup,
     )
-    jobs = StreamingJobManager()
+    jobs = StreamingJobManager(job_ttl_seconds=job_ttl_seconds)
+    gate = GenerationGate(max_concurrency=max_concurrency)
     output_dir = Path(output_dir)
     upload_dir = Path(upload_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -528,6 +633,7 @@ def create_app(
     async def lifespan(_: FastAPI):
         if preload:
             runtime_manager.get()
+        jobs.start_reaper()
         yield
 
     app = FastAPI(title="MOSS-TTS Local v1.5 Realtime Streaming", lifespan=lifespan)
@@ -549,6 +655,12 @@ def create_app(
         )
 
     def _put_stream_audio(job: StreamingJob, pcm_bytes: bytes) -> None:
+        # A client that vanished without POSTing /close (closed tab, dropped
+        # connection) stops draining the queue. Without a deadline this spins
+        # forever while holding the GenerationGate slot, stalling every other
+        # user, so treat a long stall as an abandoned job and abort it.
+        stall_timeout = max(1.0, float(stream_stall_timeout_seconds))
+        deadline = time.monotonic() + stall_timeout
         while True:
             with job.status_lock:
                 if job.is_closed:
@@ -557,9 +669,56 @@ def create_app(
                 job.audio_queue.put(pcm_bytes, timeout=0.1)
                 return
             except queue.Full:
-                continue
+                if time.monotonic() >= deadline:
+                    job.mark_closed(
+                        error=(
+                            "client stopped consuming the audio stream for "
+                            f"{int(stall_timeout)}s; job aborted"
+                        )
+                    )
+                    return
+
+    def _discard_upload(job: StreamingJob) -> None:
+        upload_path = job.upload_path
+        if upload_path is None:
+            return
+        job.upload_path = None
+        try:
+            inside_upload_dir = upload_dir.resolve() in upload_path.resolve().parents
+        except OSError:
+            return
+        if inside_upload_dir:
+            _unlink_quietly(upload_path)
+
+    def _acquire_slot(job: StreamingJob) -> bool:
+        """Wait for a synthesis slot, reporting queue position; False if closed."""
+        gate.enter_queue(job.job_id)
+        try:
+            while True:
+                with job.status_lock:
+                    if job.is_closed:
+                        return False
+                if gate.acquire(timeout=0.25):
+                    with job.status_lock:
+                        if job.is_closed:
+                            gate.release()
+                            return False
+                    return True
+                position = gate.position(job.job_id)
+                # Re-check is_closed under the same lock as the write: /close may
+                # have landed during the acquire timeout, and overwriting its
+                # terminal state would leave the job stuck on "waiting" forever.
+                with job.status_lock:
+                    if job.is_closed:
+                        return False
+                    job.status["state"] = "waiting"
+                    job.status["queue_position"] = position
+                    job.status["updated_at"] = time.time()
+        finally:
+            gate.leave_queue(job.job_id)
 
     def _run_job(job: StreamingJob, request: StreamingRequest, mode_name: str, streaming_generation: bool) -> None:
+        acquired = False
         try:
             job.update(
                 state="loading_runtime",
@@ -569,7 +728,16 @@ def create_app(
                 streaming_generation=streaming_generation,
             )
             runtime = runtime_manager.get()
-            job.update(state="running", sample_rate=runtime.sample_rate, channels=2, n_vq=runtime.n_vq)
+            acquired = _acquire_slot(job)
+            if not acquired:
+                return
+            job.update(
+                state="running",
+                queue_position=0,
+                sample_rate=runtime.sample_rate,
+                channels=2,
+                n_vq=runtime.n_vq,
+            )
             for event in synthesize_stream(runtime, request, output_dir=output_dir):
                 with job.status_lock:
                     if job.is_closed:
@@ -619,12 +787,15 @@ def create_app(
                         emitted_audio_seconds=metadata.get("duration_seconds", 0.0),
                         audio_path=event.data["audio_path"],
                     )
-            try:
-                job.audio_queue.put_nowait(None)
-            except queue.Full:
-                pass
         except Exception as exc:  # noqa: BLE001
             job.update(state="error", error=str(exc))
+        finally:
+            if acquired:
+                gate.release()
+            # No-op once _acquire_slot ran; needed when _run_job failed before it
+            # (e.g. runtime load error) since the handler registers the job.
+            gate.leave_queue(job.job_id)
+            _discard_upload(job)
             try:
                 job.audio_queue.put_nowait(None)
             except queue.Full:
@@ -663,11 +834,13 @@ def create_app(
         }[mode]
 
         prompt_audio_path = ""
+        uploaded_prompt_path: Path | None = None
         if prompt_audio is not None and prompt_audio.filename:
             suffix = Path(prompt_audio.filename).suffix or ".wav"
             prompt_path = upload_dir / f"{uuid.uuid4().hex}{suffix}"
             prompt_path.write_bytes(await prompt_audio.read())
             prompt_audio_path = str(prompt_path)
+            uploaded_prompt_path = prompt_path
         elif example_audio_path:
             candidate = Path(_decode_reference_path(example_audio_path))
             if candidate.exists() and REFERENCE_AUDIO_DIR in candidate.resolve().parents:
@@ -678,8 +851,10 @@ def create_app(
 
         if mode in {"continuation", "continuation_clone"} and prompt_audio_path:
             if not text:
+                _unlink_quietly(uploaded_prompt_path)
                 raise HTTPException(status_code=400, detail="continuation mode requires text")
             if not (prompt_text or "").strip():
+                _unlink_quietly(uploaded_prompt_path)
                 raise HTTPException(
                     status_code=400,
                     detail="continuation mode requires reference audio transcript",
@@ -711,9 +886,18 @@ def create_app(
             codec_chunk_frames=codec_chunk_frames,
         )
         job = jobs.create()
+        job.upload_path = uploaded_prompt_path
+        # Register before starting the worker so the queue_position reported
+        # below reflects the real backlog instead of always being 0.
+        gate.enter_queue(job.job_id)
         thread = threading.Thread(target=_run_job, args=(job, request, mode_name, streaming_generation_enabled), daemon=True)
         job.thread = thread
-        thread.start()
+        try:
+            thread.start()
+        except BaseException:
+            gate.leave_queue(job.job_id)
+            _discard_upload(job)
+            raise
         return JSONResponse(
             {
                 "job_id": job.job_id,
@@ -722,6 +906,8 @@ def create_app(
                 "result_url": f"/api/generate-stream/{job.job_id}/result",
                 "sample_rate": runtime_manager.status().get("sample_rate") or 48000,
                 "channels": 2,
+                "queue_position": gate.position(job.job_id),
+                "max_concurrency": gate.max_concurrency,
             }
         )
 
@@ -745,7 +931,12 @@ def create_app(
 
         def iterator():
             while True:
-                item = job.audio_queue.get()
+                try:
+                    item = job.audio_queue.get(timeout=0.5)
+                except queue.Empty:
+                    if job.is_terminal:
+                        break
+                    continue
                 if item is None:
                     break
                 yield item
@@ -802,6 +993,7 @@ def create_app(
                 "attn_implementation": attn_implementation,
                 "codec_weight_dtype": codec_weight_dtype,
                 "codec_compute_dtype": codec_compute_dtype,
+                "max_concurrency": gate.max_concurrency,
                 "runtime": runtime_manager.status(),
             }
         )
@@ -1773,7 +1965,10 @@ async function streamAudio(jobId, sampleRate, channels) {
 async function pollStatus(jobId) {
   const status = await fetchJson(apiUrl(`api/generate-stream/${jobId}/status`));
   setStatus(status);
-  field("summary").textContent = `${status.state} | mode=${status.mode || selectedModeName()} | frames=${status.generated_frames || 0} | emitted=${Number(status.emitted_audio_seconds || 0).toFixed(2)}s | lead=${Number(status.lead_seconds || 0).toFixed(2)}s | playback_delay=${currentInitialPlaybackDelaySeconds.toFixed(2)}s`;
+  const queueSuffix = (status.state === "waiting" && Number(status.queue_position) > 0)
+    ? ` (queue #${status.queue_position})`
+    : "";
+  field("summary").textContent = `${status.state}${queueSuffix} | mode=${status.mode || selectedModeName()} | frames=${status.generated_frames || 0} | emitted=${Number(status.emitted_audio_seconds || 0).toFixed(2)}s | lead=${Number(status.lead_seconds || 0).toFixed(2)}s | playback_delay=${currentInitialPlaybackDelaySeconds.toFixed(2)}s`;
   if (status.state === "finished") {
     clearInterval(statusTimer);
     statusTimer = null;
@@ -1943,6 +2138,31 @@ def _parse_args() -> argparse.Namespace:
         choices=["bf16", "fp32"],
         help="Codec non-quantizer autocast compute dtype.",
     )
+    parser.add_argument(
+        "--max-concurrency",
+        type=int,
+        default=int(os.environ.get("MAX_CONCURRENCY", "1")),
+        help=(
+            "How many synthesis jobs may run at once against the shared runtime. "
+            "Keep at 1: the model and the streaming codec decoder are stateful and "
+            "shared, so parallel jobs corrupt each other's audio."
+        ),
+    )
+    parser.add_argument(
+        "--job-ttl-seconds",
+        type=float,
+        default=float(os.environ.get("JOB_TTL_SECONDS", "900")),
+        help="Drop finished/closed stream jobs after this many seconds (0 disables).",
+    )
+    parser.add_argument(
+        "--stream-stall-timeout-seconds",
+        type=float,
+        default=float(os.environ.get("STREAM_STALL_TIMEOUT_SECONDS", "30")),
+        help=(
+            "Abort a streaming job whose client stopped reading audio for this long. "
+            "Prevents an abandoned browser tab from holding the synthesis slot."
+        ),
+    )
     parser.add_argument("--no-warmup", action="store_true")
     parser.add_argument("--no-preload", action="store_true")
     return parser.parse_args()
@@ -1966,6 +2186,9 @@ def main() -> None:
         codec_compute_dtype=args.codec_compute_dtype,
         warmup=not args.no_warmup,
         preload=not args.no_preload,
+        max_concurrency=args.max_concurrency,
+        job_ttl_seconds=args.job_ttl_seconds,
+        stream_stall_timeout_seconds=args.stream_stall_timeout_seconds,
     )
     uvicorn.run(app, host=args.host, port=int(args.port))
 
