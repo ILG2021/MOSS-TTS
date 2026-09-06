@@ -12,6 +12,7 @@ import argparse
 import importlib.util
 import json
 import queue
+import re
 import threading
 import time
 from dataclasses import dataclass, field
@@ -83,6 +84,18 @@ class StreamingRequest:
     text_top_k: int = 50
     seed: Optional[int] = None
     codec_chunk_frames: int = 8
+    prompt_audio_filename: Optional[str] = None
+
+
+def _generated_audio_filename(request: StreamingRequest) -> str:
+    reference = request.prompt_audio_filename or request.prompt_audio_path
+    if not reference:
+        return "generated.wav"
+    # Handle client paths from either Windows or Unix without using their directories.
+    basename = reference.replace("\\", "/").rsplit("/", 1)[-1]
+    stem = Path(basename).stem
+    stem = re.sub(r'[<>:"/\\|?*\x00-\x1f\x7f]', "_", stem).strip(" .")[:80].rstrip(" .")
+    return f"{stem}_generated.wav" if stem else "generated.wav"
 
 
 @dataclass
@@ -1009,7 +1022,7 @@ def synthesize_stream(
         if emitted_segments
         else torch.empty((2, 0), dtype=torch.float32)
     )
-    audio_path = run_dir / "generated.wav"
+    audio_path = run_dir / _generated_audio_filename(request)
     tokens_path = run_dir / "audio_tokens.pt"
     meta_path = run_dir / "metadata.json"
     _save_waveform(audio_path, final_audio, runtime.sample_rate)
@@ -1024,6 +1037,7 @@ def synthesize_stream(
         "text": request.text,
         "prompt_text": request.prompt_text,
         "prompt_audio_path": request.prompt_audio_path,
+        "prompt_audio_filename": request.prompt_audio_filename,
         "language": request.language,
         "tokens_control": request.tokens_control,
         "tokens": _build_prompt_fields(request).get("tokens"),

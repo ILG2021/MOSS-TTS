@@ -873,6 +873,7 @@ def create_app(
             mode="continuation" if not prompt_audio_path or mode in {"continuation", "continuation_clone"} else "voice_clone",
             prompt_text=prompt_text or "",
             prompt_audio_path=prompt_audio_path or None,
+            prompt_audio_filename=prompt_audio.filename if uploaded_prompt_path is not None else None,
             language=_normalize_language(language),
             tokens_control=bool(int(tokens_control)),
             tokens=_safe_int(tokens, default=0, minimum=0),
@@ -969,7 +970,8 @@ def create_app(
         job = jobs.get(job_id)
         if job.result is None:
             raise HTTPException(status_code=404, detail="result is not ready")
-        return FileResponse(job.result["audio_path"], media_type="audio/wav", filename="generated.wav")
+        audio_path = Path(job.result["audio_path"])
+        return FileResponse(audio_path, media_type="audio/wav", filename=audio_path.name)
 
     @app.post("/api/generate-stream/{job_id}/close")
     async def generate_stream_close(job_id: str) -> JSONResponse:
