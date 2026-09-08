@@ -145,7 +145,7 @@ torch.backends.cuda.enable_mem_efficient_sdp(True)
 torch.backends.cuda.enable_math_sdp(True)
 
 DEFAULT_UPLOAD_DIR = Path("outputs/moss_tts_local_v1_5_uploads")
-DEFAULT_MAX_NEW_TOKENS = 750
+DEFAULT_MAX_NEW_TOKENS = 7500
 MODE_CLONE = "Clone"
 MODE_CONTINUE = "Continuation"
 MODE_CONTINUE_CLONE = "Continuation + Clone"
@@ -600,7 +600,7 @@ def create_app(
     codec_device: str = "cuda:0",
     dtype: str = "bfloat16",
     attn_implementation: str = "flash_attention_2",
-    codec_weight_dtype: str = "fp32",
+    codec_weight_dtype: str = "bf16",
     codec_compute_dtype: str = "bf16",
     warmup: bool = True,
     preload: bool = True,
