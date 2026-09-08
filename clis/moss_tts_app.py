@@ -535,7 +535,7 @@ def build_demo(args: argparse.Namespace):
                 )
                 duration_tokens = gr.Slider(
                     minimum=1,
-                    maximum=1,
+                    maximum=2,
                     step=1,
                     value=1,
                     label="expected_tokens",
