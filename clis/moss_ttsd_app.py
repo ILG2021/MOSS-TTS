@@ -3,6 +3,7 @@ import functools
 import importlib.util
 import re
 import time
+import os
 from pathlib import Path
 from typing import Optional
 
@@ -11,6 +12,31 @@ import numpy as np
 import torch
 import torchaudio
 from transformers import AutoModel, AutoProcessor
+import transformers
+
+
+def _patch_repo_id(pretrained_model_name_or_path):
+    if isinstance(pretrained_model_name_or_path, (str, os.PathLike)):
+        value = str(pretrained_model_name_or_path)
+        if "\\" in value and not os.path.exists(value):
+            return value.replace("\\", "/")
+    return pretrained_model_name_or_path
+
+
+def _patch_auto_from_pretrained(auto_cls):
+    original_method = auto_cls.from_pretrained
+    original_function = getattr(original_method, "__func__", original_method)
+
+    @classmethod
+    @functools.wraps(original_function)
+    def patched_method(cls, pretrained_model_name_or_path, *args, **kwargs):
+        return original_function(cls, _patch_repo_id(pretrained_model_name_or_path), *args, **kwargs)
+
+    auto_cls.from_pretrained = patched_method
+
+
+for _auto_cls in (transformers.AutoConfig, transformers.AutoTokenizer, transformers.AutoProcessor, transformers.AutoModel):
+    _patch_auto_from_pretrained(_auto_cls)
 
 # Disable the broken cuDNN SDPA backend
 torch.backends.cuda.enable_cudnn_sdp(False)
