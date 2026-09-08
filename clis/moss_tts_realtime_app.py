@@ -10,6 +10,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterator, Sequence
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 import gradio as gr
 import numpy as np
 
@@ -26,7 +30,7 @@ from mossttsrealtime.streaming_mossttsrealtime import (
 
 torch._dynamo.config.cache_size_limit = 64
 
-APP_DIR = Path(__file__).resolve().parent
+APP_DIR = PROJECT_ROOT / "moss_tts_realtime"
 AUDIO_DIR = APP_DIR / "audio"
 SAMPLE_RATE = 24000
 
