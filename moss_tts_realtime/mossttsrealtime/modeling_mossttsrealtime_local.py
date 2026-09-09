@@ -19,6 +19,7 @@ from typing import Optional, Union
 
 import torch
 import torch.nn as nn
+import inspect
 
 from transformers.activations import ACT2FN
 from transformers.cache_utils import Cache, StaticCache
@@ -346,14 +347,19 @@ class MossTTSRealtimeLocalTransformer(MossTTSRealtimeLocalTransformerPreTrainedM
                             "When the first codebook token is provided, `backbone_last_hidden_state` should also be provided for correct inference."
                         )
 
-        causal_mask = create_causal_mask(
-            config=self.config,
-            inputs_embeds=inputs_embeds,
-            attention_mask=attention_mask,
-            cache_position=cache_position,
-            past_key_values=past_key_values,
-            position_ids=position_ids,
-        )
+        # Transformers changed this helper's keyword names/signature across
+        # releases. Build the call from the installed version's signature so
+        # realtime inference remains compatible with both variants.
+        mask_params = inspect.signature(create_causal_mask).parameters
+        mask_kwargs = {"config": self.config, "attention_mask": attention_mask,
+                       "past_key_values": past_key_values, "position_ids": position_ids}
+        if "inputs_embeds" in mask_params:
+            mask_kwargs["inputs_embeds"] = inputs_embeds
+        elif "input_embeds" in mask_params:
+            mask_kwargs["input_embeds"] = inputs_embeds
+        if "cache_position" in mask_params:
+            mask_kwargs["cache_position"] = cache_position
+        causal_mask = create_causal_mask(**mask_kwargs)
 
         hidden_states = inputs_embeds
         position_ids = cache_position.unsqueeze(0)
