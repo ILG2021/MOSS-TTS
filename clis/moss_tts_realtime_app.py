@@ -11,8 +11,10 @@ from pathlib import Path
 from typing import Iterator, Sequence
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
+REALTIME_ROOT = PROJECT_ROOT / "moss_tts_realtime"
+for import_root in (PROJECT_ROOT, REALTIME_ROOT):
+    if str(import_root) not in sys.path:
+        sys.path.insert(0, str(import_root))
 
 import gradio as gr
 import numpy as np
