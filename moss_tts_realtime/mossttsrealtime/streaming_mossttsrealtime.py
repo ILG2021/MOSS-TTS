@@ -82,8 +82,9 @@ class MossTTSRealtimeInference:
             if attn_impl:
                 break
         self._use_dynamic_local_cache = attn_impl == "flash_attention_2"
-        self._should_compile_local_transformer = not self._use_dynamic_local_cache
-        self._compiled_local_transformer = None
+        # Keep streaming inference eager.  torch.compile currently conflicts
+        # with the transformers masking path on some supported environments.
+        self._should_compile_local_transformer = False
 
     @property
     def device(self):
@@ -99,11 +100,7 @@ class MossTTSRealtimeInference:
         return StaticCache(config=self.model.local_transformer.config, max_cache_len=self.channels)
 
     def _get_local_transformer_runner(self):
-        if not self._should_compile_local_transformer:
-            return self._generate_local_transformer_impl
-        if self._compiled_local_transformer is None:
-            self._compiled_local_transformer = torch.compile(self._generate_local_transformer_impl, fullgraph=True)
-        return self._compiled_local_transformer
+        return self._generate_local_transformer_impl
 
     def reset_generation_state(self, keep_cache: bool = True):
         if not keep_cache:

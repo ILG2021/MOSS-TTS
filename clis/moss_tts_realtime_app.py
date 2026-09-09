@@ -1355,7 +1355,7 @@ def main():
     parser.add_argument(
         "--attn_implementation",
         type=str,
-        default="sdpa", # It is recommended to use sdpa, which will also use torch.compile
+        default="sdpa",
         choices=["sdpa", "flash_attention_2", "eager", "none"],
     )
     parser.add_argument("--host", type=str, default="0.0.0.0")
