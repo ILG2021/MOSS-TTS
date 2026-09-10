@@ -6,18 +6,18 @@ Examples:
     python scripts/ljspeech2jsonl.py ^
         --input metadata.txt ^
         --output train_raw.jsonl ^
-        --language zh
+        --language Chinese
 
     python scripts/ljspeech2jsonl.py ^
         --input dataset_a/metadata.txt dataset_b/metadata.txt ^
         --output train_raw.jsonl ^
-        --language zh
+        --language Chinese
 
 Input lines are expected to look like:
     2025-01-25/2025-01-25_80.wav|哎，当然呢，
 
 By default the output is plain text/audio pairs:
-    {"audio":"2025-01-25/2025-01-25_80.wav","text":"哎，当然呢，","language":"zh"}
+    {"audio":"2025-01-25/2025-01-25_80.wav","text":"哎，当然呢，","language":"Chinese"}
 """
 
 from __future__ import annotations
@@ -65,7 +65,7 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help=(
             "Root used to resolve relative audio paths. Defaults to the input "
-            "metadata file directory."
+            "metadata file directory's wavs subfolder."
         ),
     )
     parser.add_argument(
@@ -92,8 +92,9 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--skip-missing",
-        action="store_true",
-        help="Skip records whose audio file does not exist.",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Skip records whose audio file does not exist (default: enabled). Use --no-skip-missing to keep them.",
     )
     return parser.parse_args()
 
