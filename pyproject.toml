@@ -29,6 +29,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+finetune-lora = [
+    "accelerate>=1.10.1",
+    "peft>=0.18.0",
+    "wandb>=0.16.0",
+]
 flash-attn = ["flash-attn"]
 finetune = [
     "accelerate>=1.10.1",
