@@ -12,6 +12,7 @@ import gradio as gr
 import numpy as np
 import torch
 from transformers import AutoModel, AutoProcessor
+from transformers.cache_utils import DynamicCache
 import transformers
 
 
@@ -432,6 +433,13 @@ def run_inference(
     attention_mask = batch["attention_mask"].to(torch_device)
 
     with torch.no_grad():
+        # Older remote MOSS configs do not expose language_config through
+        # get_text_config(), so automatic cache creation reads the wrong config.
+        # Allocate per request: KV state must never leak between generations.
+        generation_kwargs = {}
+        language_config = getattr(model.config, "language_config", None)
+        if language_config is not None:
+            generation_kwargs["past_key_values"] = DynamicCache(config=language_config)
         outputs = model.generate(
             input_ids=input_ids,
             attention_mask=attention_mask,
@@ -440,6 +448,7 @@ def run_inference(
             audio_top_p=float(top_p),
             audio_top_k=int(top_k),
             audio_repetition_penalty=float(repetition_penalty),
+            **generation_kwargs,
         )
 
     with audio_tokenizer_on_device(processor, torch_device, tokenizer_offload):
