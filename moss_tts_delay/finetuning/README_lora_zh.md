@@ -5,40 +5,50 @@
 默认只训练 Qwen3 主干的 q/k/v/o_proj、gate/up/down_proj 的低秩参数；文本与音频 embedding、各输出头冻结。
 这是非量化 LoRA，仍需加载完整基础模型；显存占用取决于基础权重、序列长度和激活。
 
-## 安装与训练
+## 安装与训练（Windows 优先）
 
-先按仓库说明安装 PyTorch、Transformers 等运行环境，再在仓库根目录执行：
+以下示例以 Windows 10/11、PowerShell 和仓库根目录为准。建议先创建并激活虚拟环境，再按仓库说明安装与当前 CUDA 版本匹配的 PyTorch、Transformers 等运行环境：
 
-```bash
-pip install -e ".[finetune-lora]"
+```powershell
+py -3.10 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+python -m pip install -e ".[finetune-lora]"
 ```
 
-以下命令直接运行 Python 训练入口，无需启动脚本。多行命令使用 Bash 的 `\` 续行；
-在 PowerShell 中请将命令合为一行，或将行末 `\` 改为反引号。
+如果 PowerShell 阻止激活脚本，可仅对当前用户执行一次：
+
+```powershell
+Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+```
+
+以下命令直接运行 Python 训练入口，无需启动 `.sh` 脚本。PowerShell 使用反引号 `` ` `` 续行；为便于复制，也可将整条命令写成一行。文档中的相对路径均相对于仓库根目录。
 
 数据格式与预处理方式见 [原微调文档](README_zh.md)。未编码的数据先执行：
 
-```bash
-python moss_tts_delay/finetuning/prepare_data.py \
-  --model-path OpenMOSS-Team/MOSS-TTS-v1.5 \
-  --codec-path OpenMOSS-Team/MOSS-Audio-Tokenizer \
-  --input-jsonl train_raw.jsonl --output-jsonl train_with_codes.jsonl \
+```powershell
+python moss_tts_delay\finetuning\prepare_data.py `
+  --model-path OpenMOSS-Team/MOSS-TTS-v1.5 `
+  --codec-path OpenMOSS-Team/MOSS-Audio-Tokenizer `
+  --input-jsonl train_raw.jsonl --output-jsonl train_with_codes.jsonl `
   --device auto
 ```
 
 已有预编码数据可跳过此步。下面以单卡、几十小时单说话人数据为例，显式设置
 `rank=16`、`alpha=32`、学习率 `1e-4`：
 
-```bash
-accelerate launch --num_processes 1 moss_tts_delay/finetuning/sft_lora.py \
-  --model-path OpenMOSS-Team/MOSS-TTS-v1.5 \
-  --train-jsonl train_with_codes.jsonl \
-  --output-dir output/moss_tts_lora \
-  --per-device-batch-size 1 --gradient-accumulation-steps 8 \
-  --learning-rate 1e-4 --num-epochs 3 --mixed-precision bf16 \
-  --gradient-checkpointing --attn-implementation sdpa \
+```powershell
+python -m accelerate.commands.launch --num_processes 1 moss_tts_delay\finetuning\sft_lora.py `
+  --model-path OpenMOSS-Team/MOSS-TTS-v1.5 `
+  --train-jsonl train_with_codes.jsonl `
+  --output-dir output\moss_tts_lora `
+  --per-device-batch-size 1 --gradient-accumulation-steps 8 `
+  --learning-rate 1e-4 --num-epochs 3 --mixed-precision bf16 `
+  --gradient-checkpointing --attn-implementation sdpa `
   --lora-r 16 --lora-alpha 32 --lora-dropout 0.05
 ```
+
+在 Git Bash/WSL 中可将上面的 `python -m accelerate.commands.launch` 换回 `accelerate launch`，并将路径分隔符改为 `/`。
 
 脚本默认 `rank=8`、`alpha=16`、学习率 `1e-4`；上述命令覆盖 rank 和 alpha。
 原 `sft.py` 保持全参训练用途。
@@ -57,17 +67,17 @@ accelerate launch --num_processes 1 moss_tts_delay/finetuning/sft_lora.py \
 ### 多卡与分片输入
 
 多卡时将 `--num_processes 1` 替换为
-`--config_file moss_tts_delay/finetuning/configs/accelerate_ddp_8gpu.yaml`，按实际 GPU 数调整配置。
+`--config_file moss_tts_delay\finetuning\configs\accelerate_ddp_8gpu.yaml`，按实际 GPU 数调整配置。
 FSDP 要求 `fsdp_use_orig_params: true`，
 保存要求完整 state dict；ZeRO-3 要求 `zero3_save_16bit_model: true`。分片后端保存时会聚合完整权重，需预留内存。
 这些分布式路径沿用原训练脚本，实际兼容性应在目标训练环境验证。
 训练时各进程读取全部指定 JSONL，由 Accelerate 统一分配 batch；即使输入是预处理分片，也走同一流程。
 因此各进程需要容纳全部 JSONL 数据的 CPU 内存。`--max-train-steps` 指定训练步数时可跨越 `--num-epochs` 完成。
-分片输入请显式指定，例如 `--train-jsonl "train_with_codes.rank*.jsonl"`。
+Windows PowerShell 不会自动展开参数中的通配符，分片输入请保留引号并交给脚本处理，例如 `--train-jsonl "train_with_codes.rank*.jsonl"`。
 
 ## 保存、继续训练和推理
 
-每轮保存 `output/moss_tts_lora/checkpoint-epoch-N/`（N 从 0 开始），包含
+每轮保存 `output\moss_tts_lora\checkpoint-epoch-N\`（N 从 0 开始），包含
 `adapter_model.safetensors`、`adapter_config.json`、`finetune_args.json`，以及完整续训状态：
 
 - `training_state/`：优化器、学习率调度器、各进程 Python/NumPy/PyTorch/CUDA RNG，以及 FP16 scaler（启用时）。
@@ -80,11 +90,11 @@ FSDP 要求 `fsdp_use_orig_params: true`，
 
 完整断点续训：
 
-```bash
-accelerate launch --num_processes 1 moss_tts_delay/finetuning/sft_lora.py \
-  --train-jsonl train_with_codes.jsonl \
-  --output-dir output/moss_tts_lora_resumed \
-  --resume-from-checkpoint output/moss_tts_lora/checkpoint-step-500 \
+```powershell
+python -m accelerate.commands.launch --num_processes 1 moss_tts_delay\finetuning\sft_lora.py `
+  --train-jsonl train_with_codes.jsonl `
+  --output-dir output\moss_tts_lora_resumed `
+  --resume-from-checkpoint output\moss_tts_lora\checkpoint-step-500 `
   --save-steps 500
 ```
 
@@ -96,7 +106,7 @@ seed、LoRA 配置等训练设置，并跳过已完成 batch；这些设置会�
 同一环境下恢复随机状态和样本顺序，但 GPU 非确定性算子仍可能造成数值差异。
 本功能的真实 GPU、FSDP/DeepSpeed 恢复尚待目标环境验证。
 
-用相同基础模型加 `--lora-resume-adapter output/moss_tts_lora/checkpoint-epoch-0` 可继续训练。
+用相同基础模型加 `--lora-resume-adapter output\moss_tts_lora\checkpoint-epoch-0` 可继续训练。
 此选项仅恢复 adapter 权重，优化器、调度器和 epoch 计数重新开始，LoRA 结构以保存的 adapter 配置为准。
 它用于开始新的训练计划，不能与 `--resume-from-checkpoint` 同时使用。
 旧版本仅含 adapter 的 checkpoint 只能使用此选项。
@@ -115,11 +125,11 @@ model.eval()
 
 要直接供现有推理脚本使用，先合并成完整模型：
 
-```bash
-python moss_tts_delay/finetuning/merge_lora.py \
-  --model-path OpenMOSS-Team/MOSS-TTS-v1.5 \
-  --adapter-path output/moss_tts_lora/checkpoint-epoch-0 \
-  --output-dir output/moss_tts_lora_merged --dtype bfloat16
+```powershell
+python moss_tts_delay\finetuning\merge_lora.py `
+  --model-path OpenMOSS-Team/MOSS-TTS-v1.5 `
+  --adapter-path output\moss_tts_lora\checkpoint-epoch-0 `
+  --output-dir output\moss_tts_lora_merged --dtype bfloat16
 ```
 
 合并在 CPU 上执行，默认 float32；可用 `--dtype bfloat16` 降低内存占用。
