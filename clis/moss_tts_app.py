@@ -6,6 +6,7 @@ import re
 import time
 import orjson
 import os
+from contextlib import contextmanager
 
 import gradio as gr
 import numpy as np
@@ -164,7 +165,9 @@ def load_backend(model_path: str, device_str: str, attn_implementation: str):
         trust_remote_code=True,
     )
     if hasattr(processor, "audio_tokenizer"):
-        processor.audio_tokenizer = processor.audio_tokenizer.to(device)
+        # Keep the tokenizer on CPU between requests. It is only needed while
+        # encoding references and decoding generated audio codes.
+        processor.audio_tokenizer = processor.audio_tokenizer.to("cpu")
 
     model_kwargs = {
         "trust_remote_code": True,
@@ -178,6 +181,23 @@ def load_backend(model_path: str, device_str: str, attn_implementation: str):
 
     sample_rate = int(getattr(processor.model_config, "sampling_rate", 24000))
     return model, processor, device, sample_rate
+
+
+@contextmanager
+def audio_tokenizer_on_device(processor, device: torch.device, offload: bool):
+    """Temporarily place the audio tokenizer on the inference device."""
+    tokenizer = getattr(processor, "audio_tokenizer", None)
+    if tokenizer is None or device.type == "cpu":
+        yield
+        return
+
+    processor.audio_tokenizer = tokenizer.to(device)
+    try:
+        yield
+    finally:
+        if offload:
+            processor.audio_tokenizer = tokenizer.to("cpu")
+            torch.cuda.empty_cache()
 
 
 def resolve_attn_implementation(requested: str, device: torch.device, dtype: torch.dtype) -> str | None:
@@ -387,6 +407,7 @@ def run_inference(
     device: str,
     attn_implementation: str,
     max_new_tokens: int,
+    tokenizer_offload: bool,
 ):
     started_at = time.monotonic()
     model, processor, torch_device, sample_rate = load_backend(
@@ -405,7 +426,8 @@ def run_inference(
         processor=processor,
     )
 
-    batch = processor(conversations, mode=mode)
+    with audio_tokenizer_on_device(processor, torch_device, tokenizer_offload):
+        batch = processor(conversations, mode=mode)
     input_ids = batch["input_ids"].to(torch_device)
     attention_mask = batch["attention_mask"].to(torch_device)
 
@@ -420,7 +442,8 @@ def run_inference(
             audio_repetition_penalty=float(repetition_penalty),
         )
 
-    messages = processor.decode(outputs)
+    with audio_tokenizer_on_device(processor, torch_device, tokenizer_offload):
+        messages = processor.decode(outputs)
     if not messages or messages[0] is None:
         raise RuntimeError("The model did not return a decodable audio result.")
 
@@ -650,6 +673,7 @@ def build_demo(args: argparse.Namespace):
                 device=args.device,
                 attn_implementation=args.attn_implementation,
                 max_new_tokens=max_new_tokens,
+                tokenizer_offload=args.tokenizer_offload,
             ),
             inputs=[
                 text,
@@ -677,6 +701,12 @@ def main():
     parser.add_argument("--host", type=str, default="0.0.0.0")
     parser.add_argument("--port", type=int, default=7860)
     parser.add_argument("--share", action="store_true")
+    parser.add_argument(
+        "--tokenizer-offload",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Offload the audio tokenizer to CPU between encoding/decoding (default: enabled).",
+    )
     args = parser.parse_args()
 
     runtime_device = torch.device(args.device if torch.cuda.is_available() else "cpu")
@@ -691,7 +721,8 @@ def main():
     # Preload model/processor at startup to avoid first-request cold start latency.
     preload_started_at = time.monotonic()
     print(
-        f"[Startup] Preloading backend: model={args.model_path}, device={args.device}, attn={args.attn_implementation}",
+        f"[Startup] Preloading backend: model={args.model_path}, device={args.device}, "
+        f"attn={args.attn_implementation}, tokenizer_offload={args.tokenizer_offload}",
         flush=True,
     )
     load_backend(
