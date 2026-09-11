@@ -1,6 +1,7 @@
 import argparse
 import functools
 import importlib.util
+import inspect
 from pathlib import Path
 import re
 import time
@@ -438,7 +439,14 @@ def run_inference(
         # Allocate per request: KV state must never leak between generations.
         generation_kwargs = {}
         language_config = getattr(model.config, "language_config", None)
-        if language_config is not None:
+        # Some checkpoints implement their own generation loop and manage
+        # caches internally; their generate() does not accept this keyword.
+        generate_parameters = inspect.signature(model.generate).parameters
+        accepts_cache = (
+            "past_key_values" in generate_parameters
+            or any(p.kind == inspect.Parameter.VAR_KEYWORD for p in generate_parameters.values())
+        )
+        if language_config is not None and accepts_cache:
             generation_kwargs["past_key_values"] = DynamicCache(config=language_config)
         outputs = model.generate(
             input_ids=input_ids,
