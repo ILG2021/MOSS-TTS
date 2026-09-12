@@ -5,6 +5,7 @@ import inspect
 from pathlib import Path
 import re
 import time
+import tempfile
 import orjson
 import os
 from contextlib import contextmanager
@@ -15,6 +16,11 @@ import torch
 from transformers import AutoModel, AutoProcessor
 from transformers.cache_utils import DynamicCache
 import transformers
+
+if __package__:
+    from .tts_chunking import count_chars, iter_text_chunks, reference_tail, transcribe_reference
+else:
+    from tts_chunking import count_chars, iter_text_chunks, reference_tail, transcribe_reference
 
 
 def _patch_repo_id(pretrained_model_name_or_path):
@@ -62,7 +68,7 @@ MODEL_PATH = "OpenMOSS-Team/MOSS-TTS-v1.5"
 DEFAULT_ATTN_IMPLEMENTATION = "auto"
 DEFAULT_MAX_NEW_TOKENS = 4096
 CONTINUATION_NOTICE = (
-    "Continuation mode is active. Make sure the reference audio transcript is prepended to the input text."
+    "参考文本由 faster-whisper large-v3-turbo 自动转录并拼接；只需输入待生成文本。"
 )
 
 MODE_CLONE = "Clone"
@@ -415,7 +421,7 @@ def apply_example_selection(
     )
 
 
-def run_inference(
+def _run_single_inference(
     text: str,
     reference_audio: str | None,
     mode_with_reference: str,
@@ -489,7 +495,7 @@ def run_inference(
 
     with audio_tokenizer_on_device(processor, torch_device, tokenizer_offload):
         messages = processor.decode(outputs)
-    if not messages or messages[0] is None:
+    if not messages or messages[0] is None or not messages[0].audio_codes_list:
         raise RuntimeError("The model did not return a decodable audio result.")
 
     audio = messages[0].audio_codes_list[0]
@@ -498,9 +504,12 @@ def run_inference(
     else:
         audio_np = np.asarray(audio, dtype=np.float32)
 
-    if audio_np.ndim > 1:
-        audio_np = audio_np.reshape(-1)
+    if audio_np.ndim == 2:
+        # Processor waveforms are channel-first; flattening concatenates channels.
+        audio_np = audio_np.mean(axis=0)
     audio_np = audio_np.astype(np.float32, copy=False)
+    if audio_np.ndim != 1 or not audio_np.size or not np.isfinite(audio_np).all():
+        raise RuntimeError("The model returned invalid, empty or non-finite audio.")
 
     elapsed = time.monotonic() - started_at
     normalized_language = normalize_language_tag(language_tag)
@@ -513,6 +522,76 @@ def run_inference(
         f"audio_top_k={int(top_k)}, audio_repetition_penalty={float(repetition_penalty):.2f}"
     )
     return (sample_rate, audio_np), status
+
+
+def run_inference(text, reference_audio, mode_with_reference,
+                  duration_control_enabled, duration_tokens, language_tag,
+                  temperature, top_p, top_k, repetition_penalty, model_path,
+                  device, attn_implementation, max_new_tokens, tokenizer_offload,
+                  lora_dir=None, merge_lora=True, chunk_chars=100,
+                  asr_model="large-v3-turbo", asr_device="cpu"):
+    import wave
+
+    if chunk_chars is None or not float(chunk_chars).is_integer() or chunk_chars < 1:
+        raise ValueError("分段总字数必须为正整数")
+    remaining = text or ""
+    if not remaining.strip():
+        raise ValueError("请输入待生成文本")
+    started = time.monotonic()
+    results, details = [], []
+    current_reference = reference_audio
+    with tempfile.TemporaryDirectory(prefix="moss-rolling-") as temporary:
+        while remaining.strip():
+            index = len(results)
+            # The first reference is supplied by the user; every later one
+            # comes exclusively from the preceding newly generated waveform.
+            mode = mode_with_reference if index == 0 else MODE_CONTINUE_CLONE
+            transcript = ""
+            if current_reference:
+                transcript = transcribe_reference(current_reference, asr_model, asr_device)
+            prefix = transcript if transcript and mode in {MODE_CONTINUE, MODE_CONTINUE_CLONE} else ""
+            reference_chars = count_chars(transcript)
+            budget = int(chunk_chars) - reference_chars
+            if budget < 1:
+                raise ValueError(
+                    f"第{index + 1}段参考文本有{reference_chars}字，"
+                    f"已用完分段总字数{int(chunk_chars)}，请增大分段总字数或缩短参考音频。")
+            # Recalculate after each actual reference transcription. Later
+            # reference lengths need not match the first reference length.
+            chunks = iter_text_chunks(remaining, budget)
+            for chunk in chunks:
+                remaining = remaining[len(chunk):]
+                if chunk.strip():
+                    break
+            prompt = prefix + chunk
+            total_chars = reference_chars + count_chars(chunk)
+            print(f"[Chunk {index + 1}] total_chars={total_chars}, new_chars={count_chars(chunk)}", flush=True)
+            (sample_rate, audio), _ = _run_single_inference(
+                text=prompt, reference_audio=current_reference, mode_with_reference=mode,
+                duration_control_enabled=duration_control_enabled,
+                duration_tokens=max(1, round(int(duration_tokens) * count_chars(chunk) / count_chars(text))),
+                language_tag=language_tag, temperature=temperature, top_p=top_p,
+                top_k=top_k, repetition_penalty=repetition_penalty, model_path=model_path,
+                device=device, attn_implementation=attn_implementation,
+                max_new_tokens=max_new_tokens, tokenizer_offload=tokenizer_offload,
+                lora_dir=lora_dir, merge_lora=merge_lora)
+            if results and sample_rate != output_rate:
+                raise RuntimeError("分段音频采样率不一致")
+            output_rate = sample_rate
+            results.append(audio)
+            details.append(f"第{index + 1}段：总计{total_chars}字（参考{reference_chars}字，新增{count_chars(chunk)}字）；参考文本：{transcript or '无'}")
+            if remaining.strip():
+                current_reference = str(Path(temporary) / f"reference-{index}.wav")
+                tail = reference_tail(audio, sample_rate)
+                with wave.open(current_reference, "wb") as writer:
+                    writer.setnchannels(1)
+                    writer.setsampwidth(2)
+                    writer.setframerate(sample_rate)
+                    writer.writeframes((np.clip(tail, -1, 1) * 32767).astype("<i2").tobytes())
+    # decode() already removes the continuation prefix. Do not trim it again.
+    return (output_rate, np.concatenate(results)), (
+        f"完成 | {len(results)}段 | 分段总字数={int(chunk_chars)} | 耗时={time.monotonic() - started:.2f}s\n"
+        + "\n".join(details))
 
 
 def build_demo(args: argparse.Namespace):
@@ -578,22 +657,27 @@ def build_demo(args: argparse.Namespace):
                 text = gr.Textbox(
                     label="Text",
                     lines=9,
-                    placeholder="Enter text to synthesize. In continuation modes, prepend the reference audio transcript.",
+                    placeholder="只输入待生成文本，参考音频文本会自动转录。",
                 )
+                chunk_chars = gr.Number(
+                    label="分段总字数", value=args.chunk_chars, precision=0, minimum=1,
+                    info="参考文本＋本段新增文本的总字数上限，标点、空格和换行均计入。每段自动扣除参考字数后优先在标点处分段。",
+                )
+                gr.Markdown("后续段使用上一段末尾不超过10秒的低能量切点音频，以续写+克隆模式生成。")
                 reference_audio = gr.Audio(
                     label="Reference Audio (Optional)",
                     type="filepath",
                 )
                 mode_with_reference = gr.Radio(
                     choices=[MODE_CLONE, MODE_CONTINUE, MODE_CONTINUE_CLONE],
-                    value=MODE_CLONE,
+                    value=MODE_CONTINUE_CLONE,
                     label="Mode with Reference Audio",
-                    info="If no reference audio is uploaded, Direct Generation will be used automatically.",
+                    info="首段优先续写+克隆；未上传参考音频时首段直接生成，后续段续写+克隆。",
                 )
                 mode_hint = gr.Markdown(render_mode_hint(None, MODE_CLONE))
                 language_tag = gr.Dropdown(
                     choices=LANGUAGE_TAG_CHOICES,
-                    value=LANGUAGE_TAG_AUTO,
+                    value="Chinese",
                     label="Language Tag",
                     info="Optional for v1.5. Set this when the input language is known, especially outside Chinese and English.",
                 )
@@ -703,7 +787,7 @@ def build_demo(args: argparse.Namespace):
         )
 
         run_btn.click(
-            fn=lambda text, reference_audio, mode_with_reference, duration_control_enabled, duration_tokens, language_tag, temperature, top_p, top_k, repetition_penalty, max_new_tokens: run_inference(
+            fn=lambda text, reference_audio, mode_with_reference, duration_control_enabled, duration_tokens, language_tag, temperature, top_p, top_k, repetition_penalty, max_new_tokens, chunk_chars: run_inference(
                 text=text,
                 reference_audio=reference_audio,
                 mode_with_reference=mode_with_reference,
@@ -721,6 +805,9 @@ def build_demo(args: argparse.Namespace):
                 tokenizer_offload=args.tokenizer_offload,
                 lora_dir=args.lora_dir,
                 merge_lora=args.merge_lora,
+                chunk_chars=chunk_chars,
+                asr_model=args.asr_model,
+                asr_device=args.asr_device,
             ),
             inputs=[
                 text,
@@ -734,14 +821,42 @@ def build_demo(args: argparse.Namespace):
                 top_k,
                 repetition_penalty,
                 max_new_tokens,
+                chunk_chars,
             ],
             outputs=[output_audio, status],
+        )
+        chunk_chars.change(
+            None,
+            inputs=[chunk_chars],
+            js="""(v) => {
+                try {
+                    if (Number.isInteger(v) && v > 0) {
+                        localStorage.setItem("tts_params_0", JSON.stringify(v));
+                    }
+                } catch (_) {}
+            }"""
+        )
+        demo.load(
+            None,
+            inputs=[chunk_chars],
+            outputs=[chunk_chars],
+            js="""(current) => {
+                try {
+                    const saved = JSON.parse(localStorage.getItem("tts_params_0"));
+                    if (Number.isInteger(saved) && saved > 0) return saved;
+                } catch (_) {}
+                return current;
+            }
+            """
         )
     return demo
 
 
 def main():
     parser = argparse.ArgumentParser(description="MossTTS Gradio Demo")
+    parser.add_argument("--chunk-chars", type=int, default=100, help="界面分段总字数初始值（默认100，可在界面修改）")
+    parser.add_argument("--asr-model", default="large-v3-turbo", help="faster-whisper 模型名或本地 CTranslate2 模型目录")
+    parser.add_argument("--asr-device", choices=["cpu", "cuda"], default="cpu", help="默认 CPU int8，避免占用 TTS 显存")
     parser.add_argument("--model_path", type=str, default=MODEL_PATH)
     parser.add_argument(
         "--lora-dir", "--lora_dir",
@@ -756,7 +871,7 @@ def main():
     )
     parser.add_argument("--device", type=str, default="cuda:0")
     parser.add_argument("--attn_implementation", type=str, default=DEFAULT_ATTN_IMPLEMENTATION)
-    parser.add_argument("--host", type=str, default="0.0.0.0")
+    parser.add_argument("--host", type=str, default="127.0.0.1")
     parser.add_argument("--port", type=int, default=7860)
     parser.add_argument("--share", action="store_true")
     parser.add_argument(
@@ -766,6 +881,8 @@ def main():
         help="Offload the audio tokenizer to CPU between encoding/decoding (default: enabled).",
     )
     args = parser.parse_args()
+    if args.chunk_chars < 1:
+        parser.error("--chunk-chars 必须大于0")
     args.lora_dir = args.lora_dir.strip() or None
 
     runtime_device = torch.device(args.device if torch.cuda.is_available() else "cpu")
