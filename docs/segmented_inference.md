@@ -17,6 +17,6 @@ python clis/moss_tts_app.py
 
 首段默认“续写+克隆”并使用上传的完整参考音频；无上传则首段直接生成。后续段固定“续写+克隆”，以紧邻的上一段新增音频作为来源：短于10秒保留全部，否则在倒数10秒到倒数8秒之间用0.25秒窗口、512采样点步长寻找最低均方能量切点。没有真正静音时仍选最低能量点。切片最多10秒，每次重新转录切片，确保参考音频和文本对应。最终只拼接新增音频，不叠加参考片段。截取的参考音频保存在项目根目录 Temp/moss-rolling-随机字符/reference-0.wav 等文件中，每次请求独立建目录，完成或失败后均保留。界面状态和控制台显示保存目录，可检查后手动清理；Temp 已加入 Git 忽略列表。
 
-ASR 使用 faster-whisper 的 `large-v3-turbo`，首次使用会下载模型；`--asr-model` 可指定本地 CTranslate2 模型目录。默认 `--asr-device cpu` 使用 int8，避免挤占 TTS 显存，也可指定 `cuda`（float16）。无识别结果会报错，不会拿上一整段文本冒充切片文本。
+ASR 使用 faster-whisper 的 `large-v3-turbo`，首次使用会下载模型；`--asr-model` 可指定本地 CTranslate2 模型目录。默认 `--asr-device cpu` 使用 int8，避免挤占 TTS 显存，也可指定 `cuda`（float16）。后续片段的末尾参考音频转录失败时，回退到首段设置：有上传音频则复用上传音频及首段成功转录的文本，没有上传则无参考直接生成，并重新计算字数预算。再下一段仍尝试使用紧邻上一段的末尾音频。回退原因写入控制台和结果状态，失败的切片继续保存在 Temp 中供检查。首段上传音频本身转录失败仍会报错。
 
 参考实现：[F5-TTS chunk_text](https://github.com/SWivid/F5-TTS/blob/main/src/f5_tts/infer/utils_infer.py)、[faster-whisper](https://github.com/SYSTRAN/faster-whisper)。

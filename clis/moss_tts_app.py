@@ -540,18 +540,32 @@ def run_inference(text, reference_audio, mode_with_reference,
     started = time.monotonic()
     results, details = [], []
     current_reference = reference_audio
+    uploaded_transcript = ""
     temp_root = Path(__file__).resolve().parents[1] / 'Temp'
     temp_root.mkdir(parents=True, exist_ok=True)
     temporary = tempfile.mkdtemp(prefix='moss-rolling-', dir=temp_root)
     print(f'[Reference audio] {temporary}', flush=True)
     while remaining.strip():
         index = len(results)
-        # The first reference is supplied by the user; every later one
-        # comes exclusively from the preceding newly generated waveform.
+        # Prefer the previous waveform; fall back to the first-segment setup
+        # when its tail cannot be transcribed.
         mode = mode_with_reference if index == 0 else MODE_CONTINUE_CLONE
         transcript = ""
         if current_reference:
-            transcript = transcribe_reference(current_reference, asr_model, asr_device, language_tag)
+            try:
+                transcript = transcribe_reference(current_reference, asr_model, asr_device, language_tag)
+            except Exception as exc:
+                if index == 0:
+                    raise
+                current_reference = reference_audio
+                transcript = uploaded_transcript
+                mode = mode_with_reference
+                fallback = "使用上传的参考音频" if reference_audio else "无参考直接生成"
+                notice = f"第{index + 1}段末尾参考转录失败，{fallback}：{exc}"
+                print(f"[Reference fallback] {notice}", flush=True)
+                details.append(notice)
+            if index == 0:
+                uploaded_transcript = transcript
         prefix = transcript if transcript and mode in {MODE_CONTINUE, MODE_CONTINUE_CLONE} else ""
         reference_chars = count_chars(transcript)
         budget = int(chunk_chars) - reference_chars

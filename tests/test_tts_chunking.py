@@ -137,23 +137,34 @@ class ChunkingTests(unittest.TestCase):
             self.assertEqual(refs[1]["text"], "参考。丙丁。" if reference else "参考。戊己。")
             self.assertEqual(len(asr_calls), 2 if reference else 1)
 
-        # Preserve rolling references for inspection even if a later ASR fails.
-        refs.clear()
-        generated.clear()
-        def fail_on_tail(path, *args):
-            if path == "upload.wav":
+        # Failed tail ASR falls back without losing text; the following segment
+        # tries its new predecessor again. Uploaded transcripts are reused.
+        for reference in ["upload.wav", None]:
+            refs.clear()
+            generated.clear()
+            failed_paths, asr_paths = [], []
+            def fail_on_tail(path, *args):
+                asr_paths.append(path)
+                if path != "upload.wav" and len(generated) == 1:
+                    failed_paths.append(Path(path))
+                    raise ValueError("ASR failed")
                 return "参考。"
-            refs.append({"failed_reference": path})
-            raise ValueError("ASR failed")
-        env["transcribe_reference"] = fail_on_tail
-        with self.assertRaisesRegex(ValueError, "ASR failed"):
-            env["run_inference"](
-                "甲乙。丙丁。", "upload.wav", "Continuation + Clone",
+            env["transcribe_reference"] = fail_on_tail
+            (sr, audio), status = env["run_inference"](
+                "甲乙。丙丁。戊己。" if reference else "甲乙。丙丁。戊己。庚辛。壬癸。",
+                reference, "Continuation + Clone",
                 False, 1, "Chinese", 1, .8, 25, 1, "model", "cpu", "auto", 4096, True,
                 chunk_chars=6)
-        failed_reference = Path(refs[-1]["failed_reference"])
-        self.assertTrue(failed_reference.is_file())
-        self.assertNotEqual(failed_reference.parent, first_reference.parent)
+            self.assertEqual(len(refs), 3)
+            self.assertEqual(refs[1]["reference_audio"], reference)
+            self.assertEqual(refs[1]["text"], "参考。丙丁。" if reference else "戊己。庚辛。")
+            self.assertEqual(Path(refs[2]["reference_audio"]).name, "reference-1.wav")
+            self.assertEqual(refs[2]["text"], "参考。戊己。" if reference else "参考。壬癸。")
+            self.assertEqual(asr_paths.count("upload.wav"), 1 if reference else 0)
+            self.assertIn("末尾参考转录失败", status)
+            self.assertTrue(failed_paths[0].is_file())
+            self.assertNotEqual(failed_paths[0].parent, first_reference.parent)
+            np.testing.assert_array_equal(audio, np.concatenate(generated))
 
 
 if __name__ == "__main__":
