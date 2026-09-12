@@ -153,7 +153,13 @@ EXAMPLE_ROWS = build_example_rows()
 
 
 @functools.lru_cache(maxsize=1)
-def load_backend(model_path: str, device_str: str, attn_implementation: str):
+def load_backend(
+    model_path: str,
+    device_str: str,
+    attn_implementation: str,
+    lora_dir: str | None = None,
+    merge_lora: bool = True,
+):
     device = torch.device(device_str if torch.cuda.is_available() else "cpu")
     dtype = torch.bfloat16 if device.type == "cuda" else torch.float32
     resolved_attn_implementation = resolve_attn_implementation(
@@ -178,7 +184,22 @@ def load_backend(model_path: str, device_str: str, attn_implementation: str):
     if resolved_attn_implementation:
         model_kwargs["attn_implementation"] = resolved_attn_implementation
 
-    model = AutoModel.from_pretrained(model_path, **model_kwargs).to(device)
+    model = AutoModel.from_pretrained(model_path, **model_kwargs)
+    lora_ref = str(lora_dir).strip() if lora_dir else ""
+    if lora_ref:
+        try:
+            from peft import PeftModel
+        except ImportError as exc:
+            raise ImportError(
+                "LoRA inference requires PEFT. Install it with `python -m pip install peft`."
+            ) from exc
+
+        model = PeftModel.from_pretrained(model, lora_ref, is_trainable=False)
+        if merge_lora:
+            model = model.merge_and_unload()
+        print(f"[INFO] Loaded LoRA: {lora_ref}, merged={merge_lora}", flush=True)
+
+    model.to(device)
     model.eval()
 
     sample_rate = int(getattr(processor.model_config, "sampling_rate", 24000))
@@ -410,12 +431,16 @@ def run_inference(
     attn_implementation: str,
     max_new_tokens: int,
     tokenizer_offload: bool,
+    lora_dir: str | None = None,
+    merge_lora: bool = True,
 ):
     started_at = time.monotonic()
     model, processor, torch_device, sample_rate = load_backend(
         model_path=model_path,
         device_str=device,
         attn_implementation=attn_implementation,
+        lora_dir=lora_dir,
+        merge_lora=merge_lora,
     )
     duration_enabled = bool(duration_control_enabled and supports_duration_control(mode_with_reference))
     expected_tokens = int(duration_tokens) if duration_enabled else None
@@ -441,7 +466,10 @@ def run_inference(
         language_config = getattr(model.config, "language_config", None)
         # Some checkpoints implement their own generation loop and manage
         # caches internally; their generate() does not accept this keyword.
-        generate_parameters = inspect.signature(model.generate).parameters
+        # PEFT's generate(**kwargs) hides the base model's actual signature.
+        # Inspect the base model, but generate through PEFT to keep its hooks.
+        signature_model = model.get_base_model() if hasattr(model, "get_base_model") else model
+        generate_parameters = inspect.signature(signature_model.generate).parameters
         accepts_cache = (
             "past_key_values" in generate_parameters
             or any(p.kind == inspect.Parameter.VAR_KEYWORD for p in generate_parameters.values())
@@ -691,6 +719,8 @@ def build_demo(args: argparse.Namespace):
                 attn_implementation=args.attn_implementation,
                 max_new_tokens=max_new_tokens,
                 tokenizer_offload=args.tokenizer_offload,
+                lora_dir=args.lora_dir,
+                merge_lora=args.merge_lora,
             ),
             inputs=[
                 text,
@@ -713,6 +743,17 @@ def build_demo(args: argparse.Namespace):
 def main():
     parser = argparse.ArgumentParser(description="MossTTS Gradio Demo")
     parser.add_argument("--model_path", type=str, default=MODEL_PATH)
+    parser.add_argument(
+        "--lora-dir", "--lora_dir",
+        default=os.environ.get("LORA_DIR", ""),
+        help="Optional PEFT LoRA adapter directory or Hugging Face repo ID.",
+    )
+    parser.add_argument(
+        "--merge-lora",
+        action=argparse.BooleanOptionalAction,
+        default=os.environ.get("MERGE_LORA", "1").strip().lower() not in {"0", "false", "no", "off"},
+        help="Merge the LoRA adapter into the base model after loading (default: enabled).",
+    )
     parser.add_argument("--device", type=str, default="cuda:0")
     parser.add_argument("--attn_implementation", type=str, default=DEFAULT_ATTN_IMPLEMENTATION)
     parser.add_argument("--host", type=str, default="0.0.0.0")
@@ -725,6 +766,7 @@ def main():
         help="Offload the audio tokenizer to CPU between encoding/decoding (default: enabled).",
     )
     args = parser.parse_args()
+    args.lora_dir = args.lora_dir.strip() or None
 
     runtime_device = torch.device(args.device if torch.cuda.is_available() else "cpu")
     runtime_dtype = torch.bfloat16 if runtime_device.type == "cuda" else torch.float32
@@ -739,13 +781,16 @@ def main():
     preload_started_at = time.monotonic()
     print(
         f"[Startup] Preloading backend: model={args.model_path}, device={args.device}, "
-        f"attn={args.attn_implementation}, tokenizer_offload={args.tokenizer_offload}",
+        f"attn={args.attn_implementation}, tokenizer_offload={args.tokenizer_offload}, "
+        f"lora_dir={args.lora_dir}, merge_lora={args.merge_lora}",
         flush=True,
     )
     load_backend(
         model_path=args.model_path,
         device_str=args.device,
         attn_implementation=args.attn_implementation,
+        lora_dir=args.lora_dir,
+        merge_lora=args.merge_lora,
     )
     print(
         f"[Startup] Backend preload finished in {time.monotonic() - preload_started_at:.2f}s",
