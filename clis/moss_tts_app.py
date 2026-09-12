@@ -854,7 +854,7 @@ def build_demo(args: argparse.Namespace):
 
 def main():
     parser = argparse.ArgumentParser(description="MossTTS Gradio Demo")
-    parser.add_argument("--chunk-chars", type=int, default=100, help="界面分段总字数初始值（默认100，可在界面修改）")
+    parser.add_argument("--chunk-chars", type=int, default=243, help="界面分段总字数初始值（默认100，可在界面修改）")
     parser.add_argument("--asr-model", default="large-v3-turbo", help="faster-whisper 模型名或本地 CTranslate2 模型目录")
     parser.add_argument("--asr-device", choices=["cpu", "cuda"], default="cpu", help="默认 CPU int8，避免占用 TTS 显存")
     parser.add_argument("--model_path", type=str, default=MODEL_PATH)
