@@ -548,7 +548,7 @@ def run_inference(text, reference_audio, mode_with_reference,
             mode = mode_with_reference if index == 0 else MODE_CONTINUE_CLONE
             transcript = ""
             if current_reference:
-                transcript = transcribe_reference(current_reference, asr_model, asr_device)
+                transcript = transcribe_reference(current_reference, asr_model, asr_device, language_tag)
             prefix = transcript if transcript and mode in {MODE_CONTINUE, MODE_CONTINUE_CLONE} else ""
             reference_chars = count_chars(transcript)
             budget = int(chunk_chars) - reference_chars

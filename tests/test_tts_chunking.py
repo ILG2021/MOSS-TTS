@@ -5,13 +5,39 @@ import tempfile
 import time
 import unittest
 import wave
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
 
 import numpy as np
 
 from clis.tts_chunking import count_chars, dataset_stats, reference_tail, split_text, iter_text_chunks
+from clis.tts_chunking import whisper_language, transcribe_reference
 
 
 class ChunkingTests(unittest.TestCase):
+    def test_asr_language_mapping(self):
+        for tag, code in [("Chinese", "zh"), ("Cantonese", "yue"),
+                          ("Persian (Farsi)", "fa"), ("English", "en"),
+                          (" zh ", "zh"), ("Auto (omit)", None), (None, None)]:
+            self.assertEqual(whisper_language(tag), code)
+            backend = Mock()
+            backend.transcribe.return_value = (iter([SimpleNamespace(text="测试。")]), None)
+            with patch("clis.tts_chunking.load_asr", return_value=backend):
+                self.assertEqual(transcribe_reference("ref.wav", language_tag=tag), "测试。")
+            options = backend.transcribe.call_args.kwargs
+            self.assertEqual(options["language"], code)
+            self.assertEqual(options["initial_prompt"] is not None, code == "zh")
+        with self.assertRaises(ValueError):
+            whisper_language("not-a-language")
+        # Keep the mapping complete when the UI gains another MOSS language.
+        path = Path(__file__).resolve().parents[1] / "clis/moss_tts_app.py"
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        choices = next(n.value for n in tree.body if isinstance(n, ast.Assign)
+                       and any(isinstance(t, ast.Name) and t.id == "LANGUAGE_TAG_CHOICES" for t in n.targets))
+        for choice in choices.elts:
+            if isinstance(choice, ast.Constant):
+                self.assertIsNotNone(whisper_language(choice.value))
+
     def test_whitespace_counts(self):
         self.assertEqual(count_chars(" a\n中\t。 "), 7)
         self.assertEqual(split_text("a b\nc", 3), ["a ", "b\nc"])

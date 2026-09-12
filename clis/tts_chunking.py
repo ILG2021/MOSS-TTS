@@ -119,9 +119,42 @@ def load_asr(model_path="large-v3-turbo", device="cpu"):
     return _ASR_MODEL
 
 
-def transcribe_reference(path, model_path="large-v3-turbo", device="cpu"):
-    segments, _ = load_asr(model_path, device).transcribe(
-        str(path), beam_size=5, vad_filter=True, condition_on_previous_text=False)
+MOSS_TO_WHISPER_LANGUAGE = {
+    "chinese": "zh", "cantonese": "yue", "english": "en",
+    "arabic": "ar", "czech": "cs", "danish": "da", "dutch": "nl",
+    "finnish": "fi", "french": "fr", "german": "de", "greek": "el",
+    "hebrew": "he", "hindi": "hi", "hungarian": "hu", "italian": "it",
+    "japanese": "ja", "korean": "ko", "macedonian": "mk", "malay": "ms",
+    "persian (farsi)": "fa", "polish": "pl", "portuguese": "pt",
+    "romanian": "ro", "russian": "ru", "spanish": "es", "swahili": "sw",
+    "swedish": "sv", "tagalog": "tl", "thai": "th", "turkish": "tr",
+    "vietnamese": "vi",
+}
+
+
+def whisper_language(language_tag):
+    """Translate a MOSS UI language name to a faster-whisper language code."""
+    tag = (language_tag or "").strip().lower()
+    if tag in {"", "auto", "auto (omit)"}:
+        return None
+    if tag in MOSS_TO_WHISPER_LANGUAGE:
+        return MOSS_TO_WHISPER_LANGUAGE[tag]
+    if tag in MOSS_TO_WHISPER_LANGUAGE.values():
+        return tag
+    raise ValueError(f"不支持的 MOSS 语言标签：{language_tag}")
+
+
+def transcribe_reference(path, model_path="large-v3-turbo", device="cpu", language_tag=None):
+    """ASR 转录时强制使用指定语言，避免模型自己乱跳语言"""
+    language = whisper_language(language_tag)
+    options = {
+        "language": language,
+        "beam_size": 5,
+        "vad_filter": True,
+        "condition_on_previous_text": False,
+        "initial_prompt": "这是一个中文句子，带标点。" if language == "zh" else None
+    }
+    segments, _ = load_asr(model_path, device).transcribe(str(path), **options)
     text = "".join(segment.text for segment in segments).strip()
     if not text:
         raise ValueError("参考音频未识别出文本，请使用包含清晰语音的参考音频。")
