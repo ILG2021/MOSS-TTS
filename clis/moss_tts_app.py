@@ -540,57 +540,61 @@ def run_inference(text, reference_audio, mode_with_reference,
     started = time.monotonic()
     results, details = [], []
     current_reference = reference_audio
-    with tempfile.TemporaryDirectory(prefix="moss-rolling-") as temporary:
-        while remaining.strip():
-            index = len(results)
-            # The first reference is supplied by the user; every later one
-            # comes exclusively from the preceding newly generated waveform.
-            mode = mode_with_reference if index == 0 else MODE_CONTINUE_CLONE
-            transcript = ""
-            if current_reference:
-                transcript = transcribe_reference(current_reference, asr_model, asr_device, language_tag)
-            prefix = transcript if transcript and mode in {MODE_CONTINUE, MODE_CONTINUE_CLONE} else ""
-            reference_chars = count_chars(transcript)
-            budget = int(chunk_chars) - reference_chars
-            if budget < 1:
-                raise ValueError(
-                    f"第{index + 1}段参考文本有{reference_chars}字，"
-                    f"已用完分段总字数{int(chunk_chars)}，请增大分段总字数或缩短参考音频。")
-            # Recalculate after each actual reference transcription. Later
-            # reference lengths need not match the first reference length.
-            chunks = iter_text_chunks(remaining, budget)
-            for chunk in chunks:
-                remaining = remaining[len(chunk):]
-                if chunk.strip():
-                    break
-            prompt = prefix + chunk
-            total_chars = reference_chars + count_chars(chunk)
-            print(f"[Chunk {index + 1}] total_chars={total_chars}, new_chars={count_chars(chunk)}", flush=True)
-            (sample_rate, audio), _ = _run_single_inference(
-                text=prompt, reference_audio=current_reference, mode_with_reference=mode,
-                duration_control_enabled=duration_control_enabled,
-                duration_tokens=max(1, round(int(duration_tokens) * count_chars(chunk) / count_chars(text))),
-                language_tag=language_tag, temperature=temperature, top_p=top_p,
-                top_k=top_k, repetition_penalty=repetition_penalty, model_path=model_path,
-                device=device, attn_implementation=attn_implementation,
-                max_new_tokens=max_new_tokens, tokenizer_offload=tokenizer_offload,
-                lora_dir=lora_dir, merge_lora=merge_lora)
-            if results and sample_rate != output_rate:
-                raise RuntimeError("分段音频采样率不一致")
-            output_rate = sample_rate
-            results.append(audio)
-            details.append(f"第{index + 1}段：总计{total_chars}字（参考{reference_chars}字，新增{count_chars(chunk)}字）；参考文本：{transcript or '无'}")
-            if remaining.strip():
-                current_reference = str(Path(temporary) / f"reference-{index}.wav")
-                tail = reference_tail(audio, sample_rate)
-                with wave.open(current_reference, "wb") as writer:
-                    writer.setnchannels(1)
-                    writer.setsampwidth(2)
-                    writer.setframerate(sample_rate)
-                    writer.writeframes((np.clip(tail, -1, 1) * 32767).astype("<i2").tobytes())
+    temp_root = Path(__file__).resolve().parents[1] / 'Temp'
+    temp_root.mkdir(parents=True, exist_ok=True)
+    temporary = tempfile.mkdtemp(prefix='moss-rolling-', dir=temp_root)
+    print(f'[Reference audio] {temporary}', flush=True)
+    while remaining.strip():
+        index = len(results)
+        # The first reference is supplied by the user; every later one
+        # comes exclusively from the preceding newly generated waveform.
+        mode = mode_with_reference if index == 0 else MODE_CONTINUE_CLONE
+        transcript = ""
+        if current_reference:
+            transcript = transcribe_reference(current_reference, asr_model, asr_device, language_tag)
+        prefix = transcript if transcript and mode in {MODE_CONTINUE, MODE_CONTINUE_CLONE} else ""
+        reference_chars = count_chars(transcript)
+        budget = int(chunk_chars) - reference_chars
+        if budget < 1:
+            raise ValueError(
+                f"第{index + 1}段参考文本有{reference_chars}字，"
+                f"已用完分段总字数{int(chunk_chars)}，请增大分段总字数或缩短参考音频。")
+        # Recalculate after each actual reference transcription. Later
+        # reference lengths need not match the first reference length.
+        chunks = iter_text_chunks(remaining, budget)
+        for chunk in chunks:
+            remaining = remaining[len(chunk):]
+            if chunk.strip():
+                break
+        prompt = prefix + chunk
+        total_chars = reference_chars + count_chars(chunk)
+        print(f"[Chunk {index + 1}] total_chars={total_chars}, new_chars={count_chars(chunk)}", flush=True)
+        (sample_rate, audio), _ = _run_single_inference(
+            text=prompt, reference_audio=current_reference, mode_with_reference=mode,
+            duration_control_enabled=duration_control_enabled,
+            duration_tokens=max(1, round(int(duration_tokens) * count_chars(chunk) / count_chars(text))),
+            language_tag=language_tag, temperature=temperature, top_p=top_p,
+            top_k=top_k, repetition_penalty=repetition_penalty, model_path=model_path,
+            device=device, attn_implementation=attn_implementation,
+            max_new_tokens=max_new_tokens, tokenizer_offload=tokenizer_offload,
+            lora_dir=lora_dir, merge_lora=merge_lora)
+        if results and sample_rate != output_rate:
+            raise RuntimeError("分段音频采样率不一致")
+        output_rate = sample_rate
+        results.append(audio)
+        details.append(f"第{index + 1}段：总计{total_chars}字（参考{reference_chars}字，新增{count_chars(chunk)}字）；参考文本：{transcript or '无'}")
+        if remaining.strip():
+            current_reference = str(Path(temporary) / f"reference-{index}.wav")
+            tail = reference_tail(audio, sample_rate)
+            with wave.open(current_reference, "wb") as writer:
+                writer.setnchannels(1)
+                writer.setsampwidth(2)
+                writer.setframerate(sample_rate)
+                writer.writeframes((np.clip(tail, -1, 1) * 32767).astype("<i2").tobytes())
     # decode() already removes the continuation prefix. Do not trim it again.
     return (output_rate, np.concatenate(results)), (
         f"完成 | {len(results)}段 | 分段总字数={int(chunk_chars)} | 耗时={time.monotonic() - started:.2f}s\n"
+        f"参考音频目录：{temporary}\n"
         + "\n".join(details))
 
 

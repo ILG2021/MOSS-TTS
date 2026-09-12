@@ -214,3 +214,6 @@ dev/*
 weights
 
 outputs/*
+
+# Retained rolling reference audio for inspection
+/Temp/

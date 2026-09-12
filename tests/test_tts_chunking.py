@@ -77,6 +77,8 @@ class ChunkingTests(unittest.TestCase):
         function = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "run_inference")
         generated = []
         refs = []
+        test_root = tempfile.TemporaryDirectory()
+        self.addCleanup(test_root.cleanup)
         def infer(**kwargs):
             refs.append(kwargs)
             audio = np.full(12000, 0.1 * len(refs), dtype=np.float32)
@@ -91,6 +93,7 @@ class ChunkingTests(unittest.TestCase):
                 self.assertAlmostEqual(float(audio.mean()), float(generated[-1].mean()), places=4)
             return ["参考。", "参考一。", "参考二。"][len(refs)]
         env = dict(np=np, Path=Path, time=time, tempfile=tempfile, count_chars=count_chars,
+                   __file__=str(Path(test_root.name) / "clis" / "moss_tts_app.py"),
                    iter_text_chunks=iter_text_chunks, reference_tail=reference_tail,
                    transcribe_reference=transcribe, _run_single_inference=infer,
                    MODE_CONTINUE="Continuation", MODE_CONTINUE_CLONE="Continuation + Clone")
@@ -104,7 +107,10 @@ class ChunkingTests(unittest.TestCase):
         self.assertEqual([r["text"] for r in refs], ["参考。甲乙。", "参考一。丙丁。", "参考二。戊己。"])
         self.assertTrue(all(len(r["text"]) <= 8 for r in refs))
         np.testing.assert_array_equal(audio, np.concatenate(generated))
-        self.assertFalse(Path(refs[1]["reference_audio"]).exists())
+        first_reference = Path(refs[1]["reference_audio"])
+        self.assertTrue(first_reference.is_file())
+        self.assertEqual(first_reference.parent.parent, Path(test_root.name) / "Temp")
+        self.assertIn(str(first_reference.parent), status)
         env["transcribe_reference"] = lambda *args: "参考文本实在太长。"
         previous_calls = len(refs)
         with self.assertRaisesRegex(ValueError, "已用完分段总字数"):
@@ -131,7 +137,7 @@ class ChunkingTests(unittest.TestCase):
             self.assertEqual(refs[1]["text"], "参考。丙丁。" if reference else "参考。戊己。")
             self.assertEqual(len(asr_calls), 2 if reference else 1)
 
-        # A failure after creating a rolling reference must also clean it up.
+        # Preserve rolling references for inspection even if a later ASR fails.
         refs.clear()
         generated.clear()
         def fail_on_tail(path, *args):
@@ -145,7 +151,9 @@ class ChunkingTests(unittest.TestCase):
                 "甲乙。丙丁。", "upload.wav", "Continuation + Clone",
                 False, 1, "Chinese", 1, .8, 25, 1, "model", "cpu", "auto", 4096, True,
                 chunk_chars=6)
-        self.assertFalse(Path(refs[-1]["failed_reference"]).exists())
+        failed_reference = Path(refs[-1]["failed_reference"])
+        self.assertTrue(failed_reference.is_file())
+        self.assertNotEqual(failed_reference.parent, first_reference.parent)
 
 
 if __name__ == "__main__":
