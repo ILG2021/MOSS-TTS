@@ -33,7 +33,7 @@ app-asr = ["faster-whisper>=1.1.0"]
 finetune-lora = [
     "accelerate>=1.10.1",
     "peft>=0.18.0",
-    "wandb>=0.16.0",
+    "tensorboard>=2.16.0",
 ]
 flash-attn = ["flash-attn"]
 finetune = [

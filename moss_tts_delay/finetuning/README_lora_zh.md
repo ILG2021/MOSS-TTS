@@ -134,3 +134,21 @@ python moss_tts_delay\finetuning\merge_lora.py `
 
 合并在 CPU 上执行，默认 float32；可用 `--dtype bfloat16` 降低内存占用。
 输出目录必须为空或不存在，基础模型必须与训练时一致。
+
+## TensorBoard 训练日志
+
+Delay LoRA 已使用 TensorBoard 替代 W&B，不再接受 `--wandb-*` 参数。
+安装依赖：`pip install tensorboard`，或重新安装 `pip install -e ".[finetune-lora]"`。
+
+默认启用日志，保存到 `<output-dir>/tensorboard`，只由主进程写入。
+记录 loss、学习率、每步耗时、每秒步数、每秒样本数、epoch、预计剩余秒数及训练参数。
+`--logging-steps` 控制指标记录间隔；loss 沿用原训练脚本的口径，即记录时最后一个 micro-batch 的跨进程平均值。
+
+```powershell
+tensorboard --logdir output/moss_tts_lora/tensorboard --port 6006
+```
+
+浏览器打开 `http://localhost:6006`。可用 `--tensorboard-log-dir 路径` 自定义日志目录，
+用 `--no-tensorboard` 关闭。不同训练实验应使用不同目录。
+完整断点续训时继续使用原日志目录，保留 checkpoint 已完成步数的记录，并隐藏其后失效的旧指标。
+训练正常结束或抛出异常时关闭 writer，将已排队事件写入磁盘。

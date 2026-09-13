@@ -284,8 +284,10 @@ def update_duration_controls(
     text: str,
     current_tokens: float | int | None,
     mode_with_reference: str,
+    subsequent_mode: str | None = None,
 ):
-    if not supports_duration_control(mode_with_reference):
+    if not any(supports_duration_control(mode) for mode in
+               (mode_with_reference, subsequent_mode or mode_with_reference)):
         return (
             gr.update(visible=False),
             "Duration control is disabled for Continuation modes.",
@@ -381,16 +383,17 @@ def build_conversation(
 
 def render_mode_hint(reference_audio: str | None, mode_with_reference: str):
     if not reference_audio:
-        return "Current mode: **Direct Generation** (no reference audio uploaded)"
+        return "首段：**直接生成**（未上传参考音频）"
     if mode_with_reference == MODE_CLONE:
-        return "Current mode: **Clone** (speaker timbre will be cloned from the reference audio)"
-    return f"Current mode: **{mode_with_reference}**  \n> {CONTINUATION_NOTICE}"
+        return "首段：**克隆**（使用上传的参考音频）"
+    return f"首段：**续写 + 克隆**  \n> {CONTINUATION_NOTICE}"
 
 
 def apply_example_selection(
     mode_with_reference: str,
     duration_control_enabled: bool,
     duration_tokens: int,
+    subsequent_mode: str,
     evt: gr.SelectData,
 ):
     if evt is None or evt.index is None:
@@ -410,6 +413,7 @@ def apply_example_selection(
         example_text,
         duration_tokens,
         mode_with_reference,
+        subsequent_mode,
     )
     return (
         audio_path,
@@ -529,11 +533,15 @@ def run_inference(text, reference_audio, mode_with_reference,
                   temperature, top_p, top_k, repetition_penalty, model_path,
                   device, attn_implementation, max_new_tokens, tokenizer_offload,
                   lora_dir=None, merge_lora=True, chunk_chars=100,
-                  asr_model="large-v3-turbo", asr_device="cpu"):
+                  asr_model="large-v3-turbo", asr_device="cpu",
+                  subsequent_mode=MODE_CONTINUE_CLONE):
     import wave
 
+    if any(mode not in {MODE_CLONE, MODE_CONTINUE_CLONE}
+           for mode in (mode_with_reference, subsequent_mode)):
+        raise ValueError("分段模式仅支持克隆和续写+克隆")
     if chunk_chars is None or not float(chunk_chars).is_integer() or chunk_chars < 1:
-        raise ValueError("分段总字数必须为正整数")
+        raise ValueError("分段字数必须为正整数")
     remaining = text or ""
     if not remaining.strip():
         raise ValueError("请输入待生成文本")
@@ -547,19 +555,18 @@ def run_inference(text, reference_audio, mode_with_reference,
     print(f'[Reference audio] {temporary}', flush=True)
     while remaining.strip():
         index = len(results)
-        # Prefer the previous waveform; fall back to the first-segment setup
-        # when its tail cannot be transcribed.
-        mode = mode_with_reference if index == 0 else MODE_CONTINUE_CLONE
+        mode = mode_with_reference if index == 0 else subsequent_mode
+        if index == 0 or mode == MODE_CLONE:
+            current_reference = reference_audio
         transcript = ""
         if current_reference:
             try:
                 transcript = transcribe_reference(current_reference, asr_model, asr_device, language_tag)
             except Exception as exc:
-                if index == 0:
+                if index == 0 or mode == MODE_CLONE:
                     raise
                 current_reference = reference_audio
                 transcript = uploaded_transcript
-                mode = mode_with_reference
                 fallback = "使用上传的参考音频" if reference_audio else "无参考直接生成"
                 notice = f"第{index + 1}段末尾参考转录失败，{fallback}：{exc}"
                 print(f"[Reference fallback] {notice}", flush=True)
@@ -572,7 +579,7 @@ def run_inference(text, reference_audio, mode_with_reference,
         if budget < 1:
             raise ValueError(
                 f"第{index + 1}段参考文本有{reference_chars}字，"
-                f"已用完分段总字数{int(chunk_chars)}，请增大分段总字数或缩短参考音频。")
+                f"已用完分段字数{int(chunk_chars)}，请增大分段字数或缩短参考音频。")
         # Recalculate after each actual reference transcription. Later
         # reference lengths need not match the first reference length.
         chunks = iter_text_chunks(remaining, budget)
@@ -596,8 +603,14 @@ def run_inference(text, reference_audio, mode_with_reference,
             raise RuntimeError("分段音频采样率不一致")
         output_rate = sample_rate
         results.append(audio)
-        details.append(f"第{index + 1}段：总计{total_chars}字（参考{reference_chars}字，新增{count_chars(chunk)}字）；参考文本：{transcript or '无'}")
-        if remaining.strip():
+        details.append(
+            f"第{index + 1}段：模式={mode if current_reference else '直接生成'}；"
+            f"总计{total_chars}字（参考{reference_chars}字，新增{count_chars(chunk)}字）\n"
+            f"参考音频路径：{current_reference or '无'}\n"
+            f"参考文本：{transcript or '无'}\n"
+            f"生成文本：{prompt}"
+        )
+        if remaining.strip() and subsequent_mode == MODE_CONTINUE_CLONE:
             current_reference = str(Path(temporary) / f"reference-{index}.wav")
             tail = reference_tail(audio, sample_rate)
             with wave.open(current_reference, "wb") as writer:
@@ -607,7 +620,7 @@ def run_inference(text, reference_audio, mode_with_reference,
                 writer.writeframes((np.clip(tail, -1, 1) * 32767).astype("<i2").tobytes())
     # decode() already removes the continuation prefix. Do not trim it again.
     return (output_rate, np.concatenate(results)), (
-        f"完成 | {len(results)}段 | 分段总字数={int(chunk_chars)} | 耗时={time.monotonic() - started:.2f}s\n"
+        f"完成 | {len(results)}段 | 分段字数={int(chunk_chars)} | 耗时={time.monotonic() - started:.2f}s\n"
         f"参考音频目录：{temporary}\n"
         + "\n".join(details))
 
@@ -665,7 +678,7 @@ def build_demo(args: argparse.Namespace):
             """
             <div class="app-card">
               <div class="app-title">MOSS-TTS v1.5</div>
-              <div class="app-subtitle">Direct Generation, Clone, Continuation, Continuation + Clone, language tags, and inline pause markers</div>
+              <div class="app-subtitle">Direct Generation, Clone, Continuation + Clone, language tags, and inline pause markers</div>
             </div>
             """
         )
@@ -678,19 +691,25 @@ def build_demo(args: argparse.Namespace):
                     placeholder="只输入待生成文本，参考音频文本会自动转录。",
                 )
                 chunk_chars = gr.Number(
-                    label="分段总字数", value=args.chunk_chars, precision=0, minimum=1,
+                    label="分段字数", value=args.chunk_chars, precision=0, minimum=1,
                     info="参考文本＋本段新增文本的总字数上限，标点、空格和换行均计入。每段自动扣除参考字数后优先在标点处分段。",
                 )
-                gr.Markdown("后续段使用上一段末尾不超过10秒的低能量切点音频，以续写+克隆模式生成。")
+                gr.Markdown("首段使用上传音频；后续段克隆使用上传音频，续写+克隆使用上一段末尾不超过10秒的音频。")
                 reference_audio = gr.Audio(
                     label="Reference Audio (Optional)",
                     type="filepath",
                 )
                 mode_with_reference = gr.Radio(
-                    choices=[MODE_CLONE, MODE_CONTINUE, MODE_CONTINUE_CLONE],
+                    choices=[MODE_CLONE, MODE_CONTINUE_CLONE],
+                    value=MODE_CLONE,
+                    label="首段模式",
+                    info="两种模式均使用用户上传的参考音频；未上传则直接生成。",
+                )
+                subsequent_mode = gr.Radio(
+                    choices=[MODE_CLONE, MODE_CONTINUE_CLONE],
                     value=MODE_CONTINUE_CLONE,
-                    label="Mode with Reference Audio",
-                    info="首段优先续写+克隆；未上传参考音频时首段直接生成，后续段续写+克隆。",
+                    label="后续段模式",
+                    info="克隆使用上传音频（未上传则直接生成）；续写+克隆使用前一段尾部音频。",
                 )
                 mode_hint = gr.Markdown(render_mode_hint(None, MODE_CLONE))
                 language_tag = gr.Dropdown(
@@ -701,7 +720,7 @@ def build_demo(args: argparse.Namespace):
                 )
                 duration_control_enabled = gr.Checkbox(
                     value=False,
-                    label="Enable Duration Control (Expected Audio Tokens)",
+                    label="Enable Duration Control (Expected Audio Tokens，仅作用于克隆段)",
                 )
                 duration_tokens = gr.Slider(
                     minimum=1,
@@ -778,22 +797,27 @@ def build_demo(args: argparse.Namespace):
         )
         duration_control_enabled.change(
             fn=update_duration_controls,
-            inputs=[duration_control_enabled, text, duration_tokens, mode_with_reference],
+            inputs=[duration_control_enabled, text, duration_tokens, mode_with_reference, subsequent_mode],
             outputs=[duration_tokens, duration_hint, duration_control_enabled],
         )
         text.change(
             fn=update_duration_controls,
-            inputs=[duration_control_enabled, text, duration_tokens, mode_with_reference],
+            inputs=[duration_control_enabled, text, duration_tokens, mode_with_reference, subsequent_mode],
             outputs=[duration_tokens, duration_hint, duration_control_enabled],
         )
         mode_with_reference.change(
             fn=update_duration_controls,
-            inputs=[duration_control_enabled, text, duration_tokens, mode_with_reference],
+            inputs=[duration_control_enabled, text, duration_tokens, mode_with_reference, subsequent_mode],
+            outputs=[duration_tokens, duration_hint, duration_control_enabled],
+        )
+        subsequent_mode.change(
+            fn=update_duration_controls,
+            inputs=[duration_control_enabled, text, duration_tokens, mode_with_reference, subsequent_mode],
             outputs=[duration_tokens, duration_hint, duration_control_enabled],
         )
         examples_table.select(
             fn=apply_example_selection,
-            inputs=[mode_with_reference, duration_control_enabled, duration_tokens],
+            inputs=[mode_with_reference, duration_control_enabled, duration_tokens, subsequent_mode],
             outputs=[
                 reference_audio,
                 text,
@@ -805,7 +829,7 @@ def build_demo(args: argparse.Namespace):
         )
 
         run_btn.click(
-            fn=lambda text, reference_audio, mode_with_reference, duration_control_enabled, duration_tokens, language_tag, temperature, top_p, top_k, repetition_penalty, max_new_tokens, chunk_chars: run_inference(
+            fn=lambda text, reference_audio, mode_with_reference, duration_control_enabled, duration_tokens, language_tag, temperature, top_p, top_k, repetition_penalty, max_new_tokens, chunk_chars, subsequent_mode: run_inference(
                 text=text,
                 reference_audio=reference_audio,
                 mode_with_reference=mode_with_reference,
@@ -826,6 +850,7 @@ def build_demo(args: argparse.Namespace):
                 chunk_chars=chunk_chars,
                 asr_model=args.asr_model,
                 asr_device=args.asr_device,
+                subsequent_mode=subsequent_mode,
             ),
             inputs=[
                 text,
@@ -840,6 +865,7 @@ def build_demo(args: argparse.Namespace):
                 repetition_penalty,
                 max_new_tokens,
                 chunk_chars,
+                subsequent_mode,
             ],
             outputs=[output_audio, status],
         )
@@ -872,7 +898,7 @@ def build_demo(args: argparse.Namespace):
 
 def main():
     parser = argparse.ArgumentParser(description="MossTTS Gradio Demo")
-    parser.add_argument("--chunk-chars", type=int, default=243, help="界面分段总字数初始值（默认100，可在界面修改）")
+    parser.add_argument("--chunk-chars", type=int, default=243, help="界面分段字数初始值（默认100，可在界面修改）")
     parser.add_argument("--asr-model", default="large-v3-turbo", help="faster-whisper 模型名或本地 CTranslate2 模型目录")
     parser.add_argument("--asr-device", choices=["cpu", "cuda"], default="cpu", help="默认 CPU int8，避免占用 TTS 显存")
     parser.add_argument("--model_path", type=str, default=MODEL_PATH)

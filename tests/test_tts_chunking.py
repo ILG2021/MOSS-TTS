@@ -96,7 +96,7 @@ class ChunkingTests(unittest.TestCase):
                    __file__=str(Path(test_root.name) / "clis" / "moss_tts_app.py"),
                    iter_text_chunks=iter_text_chunks, reference_tail=reference_tail,
                    transcribe_reference=transcribe, _run_single_inference=infer,
-                   MODE_CONTINUE="Continuation", MODE_CONTINUE_CLONE="Continuation + Clone")
+                   MODE_CLONE="Clone", MODE_CONTINUE="Continuation", MODE_CONTINUE_CLONE="Continuation + Clone")
         exec(compile(ast.Module(body=[function], type_ignores=[]), str(path), "exec"), env)
         (sr, audio), status = env["run_inference"](
             "甲乙。丙丁。戊己。", "upload.wav", "Continuation + Clone",
@@ -136,6 +136,33 @@ class ChunkingTests(unittest.TestCase):
             self.assertEqual(refs[0]["text"], "甲乙。" if reference else "甲乙。丙丁。")
             self.assertEqual(refs[1]["text"], "参考。丙丁。" if reference else "参考。戊己。")
             self.assertEqual(len(asr_calls), 2 if reference else 1)
+
+        # Both segment selectors independently control prompt composition and
+        # reference source, including generation without an upload.
+        for first_mode in ["Clone", "Continuation + Clone"]:
+            for later_mode in ["Clone", "Continuation + Clone"]:
+                for reference in ["upload.wav", None]:
+                    with self.subTest(first=first_mode, later=later_mode, reference=reference):
+                        refs.clear()
+                        generated.clear()
+                        env["transcribe_reference"] = lambda *args: "参考。"
+                        env["run_inference"](
+                            "甲乙。丙丁。戊己。庚辛。", reference, first_mode,
+                            False, 1, "Chinese", 1, .8, 25, 1, "model", "cpu", "auto", 4096, True,
+                            chunk_chars=6, subsequent_mode=later_mode)
+                        self.assertGreaterEqual(len(refs), 2)
+                        self.assertEqual(refs[0]["reference_audio"], reference)
+                        self.assertEqual(refs[0]["mode_with_reference"], first_mode)
+                        self.assertEqual(refs[0]["text"].startswith("参考。"),
+                                         bool(reference) and first_mode == "Continuation + Clone")
+                        for i, call in enumerate(refs[1:], 1):
+                            self.assertEqual(call["mode_with_reference"], later_mode)
+                            if later_mode == "Clone":
+                                self.assertEqual(call["reference_audio"], reference)
+                                self.assertFalse(call["text"].startswith("参考。"))
+                            else:
+                                self.assertEqual(Path(call["reference_audio"]).name, f"reference-{i-1}.wav")
+                                self.assertTrue(call["text"].startswith("参考。"))
 
         # Failed tail ASR falls back without losing text; the following segment
         # tries its new predecessor again. Uploaded transcripts are reused.

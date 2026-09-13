@@ -180,18 +180,16 @@ def parse_args(argv=None) -> argparse.Namespace:
     parser.add_argument("--max-grad-norm", type=float, default=1.0)
     parser.add_argument("--logging-steps", type=int, default=1)
     parser.add_argument(
-        "--wandb-project",
-        type=str,
-        default=None,
-        help="If set, log metrics to Weights & Biases (main process only). Requires: pip install wandb",
+        "--tensorboard",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Write TensorBoard logs on the main process (default: enabled).",
     )
-    parser.add_argument("--wandb-run-name", type=str, default=None)
-    parser.add_argument("--wandb-entity", type=str, default=None)
     parser.add_argument(
-        "--wandb-tags",
+        "--tensorboard-log-dir",
         type=str,
         default=None,
-        help="Comma-separated tags for the W&B run.",
+        help="TensorBoard event directory (default: <output-dir>/tensorboard).",
     )
     parser.add_argument("--num-workers", type=int, default=0)
     parser.add_argument("--mixed-precision", type=str, default="bf16", choices=["no", "fp16", "bf16"])
@@ -445,8 +443,8 @@ def read_resume_checkpoint(args):
         saved_args = json.load(handle)
     runtime_keys = {
         "resume_from_checkpoint", "lora_resume_adapter", "train_jsonl", "output_dir",
-        "save_steps", "logging_steps", "wandb_project", "wandb_run_name",
-        "wandb_entity", "wandb_tags", "audio_tokenizer_device",
+        "save_steps", "logging_steps", "tensorboard", "tensorboard_log_dir",
+        "audio_tokenizer_device",
     }
     for key in vars(args):
         if key not in runtime_keys and key in saved_args:
@@ -526,6 +524,28 @@ def save_checkpoint(
             json.dump({"format_version": 1, **progress}, handle, indent=2)
         temporary.replace(output_dir / "trainer_state.json")
     accelerator.wait_for_everyone()
+
+
+@contextmanager
+def tensorboard_logger(args, accelerator, output_root, train_args, resume_progress):
+    if not args.tensorboard or not accelerator.is_main_process:
+        yield None
+        return
+    try:
+        from torch.utils.tensorboard import SummaryWriter
+    except ImportError as exc:
+        raise ImportError("TensorBoard is not installed. Install with: pip install tensorboard") from exc
+    log_dir = Path(args.tensorboard_log_dir) if args.tensorboard_log_dir else output_root / "tensorboard"
+    # The checkpoint's completed step is valid; discard only later events.
+    purge_step = resume_progress["global_step"] + 1 if resume_progress else None
+    writer = SummaryWriter(log_dir=str(log_dir), purge_step=purge_step, flush_secs=10)
+    try:
+        writer.add_text("config/train_args", "```json\n" + json.dumps(train_args, ensure_ascii=False, indent=2) + "\n```",
+                        global_step=resume_progress["global_step"] if resume_progress else 0)
+        accelerator.print(f"TensorBoard logs: {log_dir.resolve()}")
+        yield writer
+    finally:
+        writer.close()
 
 
 def main(argv=None) -> None:
@@ -670,28 +690,7 @@ def main(argv=None) -> None:
     train_args_to_save["resolved_channelwise_loss_weight"] = resolved_channelwise_loss_weight
     train_args_to_save["dataset_fingerprint"] = fingerprint
 
-    wandb_module = None
-    if args.wandb_project and accelerator.is_main_process:
-        try:
-            import wandb
-        except ImportError as exc:
-            raise ImportError(
-                "wandb is not installed. Install with: pip install wandb"
-            ) from exc
-        init_kwargs: Dict[str, Any] = {
-            "project": args.wandb_project,
-            "config": train_args_to_save,
-        }
-        if args.wandb_entity:
-            init_kwargs["entity"] = args.wandb_entity
-        if args.wandb_run_name:
-            init_kwargs["name"] = args.wandb_run_name
-        if args.wandb_tags:
-            init_kwargs["tags"] = [t.strip() for t in args.wandb_tags.split(",") if t.strip()]
-        wandb.init(**init_kwargs)
-        wandb_module = wandb
-
-    try:
+    with tensorboard_logger(args, accelerator, output_root, train_args_to_save, resume_progress) as writer:
         if resume_progress:
             # Restore RNG after model, dataloader and logger initialization.
             accelerator.load_state(str(Path(args.resume_from_checkpoint) / "training_state"))
@@ -707,12 +706,9 @@ def main(argv=None) -> None:
             global_batch_size,
             output_root,
             train_args_to_save,
-            wandb_module,
+            writer,
             resume_progress,
         )
-    finally:
-        if wandb_module is not None:
-            wandb_module.finish()
 
 
 def _training_loop(
@@ -727,7 +723,7 @@ def _training_loop(
     global_batch_size: int,
     output_root: Path,
     train_args_to_save: Dict[str, Any],
-    wandb_module: Optional[Any],
+    writer: Optional[Any],
     resume_progress: Optional[Dict[str, Any]] = None,
 ) -> None:
     global_step = resume_progress["global_step"] if resume_progress else 0
@@ -812,18 +808,18 @@ def _training_loop(
                         f"samples_per_sec={samples_per_sec:.2f} "
                         f"eta={format_duration(eta_seconds)}"
                     )
-                    if wandb_module is not None:
-                        wandb_module.log(
-                            {
+                    if writer is not None:
+                        metrics = {
                                 "train/loss": logged_loss,
                                 "train/lr": lr_val,
                                 "train/step_time": step_time,
                                 "train/steps_per_sec": steps_per_sec,
                                 "train/samples_per_sec": samples_per_sec,
                                 "train/epoch": epoch,
-                            },
-                            step=global_step,
-                        )
+                                "train/eta_seconds": eta_seconds,
+                        }
+                        for tag, value in metrics.items():
+                            writer.add_scalar(tag, value, global_step=global_step)
 
                 if args.save_steps and global_step % args.save_steps == 0:
                     checkpoint(output_root / f"checkpoint-step-{global_step}", epoch, batch_index + 1)

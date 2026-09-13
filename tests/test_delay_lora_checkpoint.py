@@ -15,20 +15,21 @@ import types
 import unittest
 from contextlib import contextmanager
 from pathlib import Path
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 
 def load_helpers():
     source = Path(__file__).resolve().parents[1] / "moss_tts_delay/finetuning/sft_lora.py"
     tree = ast.parse(source.read_text(encoding="utf-8"))
     names = {"read_resume_checkpoint", "dataset_fingerprint", "configure_checkpoint_hooks",
-             "save_checkpoint", "_training_loop"}
+             "save_checkpoint", "_training_loop", "tensorboard_logger"}
     module = ast.Module(body=[n for n in tree.body if isinstance(n, ast.FunctionDef)
                              and n.name in names], type_ignores=[])
-    scope = dict(Path=Path, json=json, hashlib=hashlib, math=math, time=time,
+    scope = dict(Path=Path, json=json, hashlib=hashlib, math=math, time=time, contextmanager=contextmanager,
                  DistributedType=types.SimpleNamespace(FSDP="FSDP", DEEPSPEED="DEEPSPEED"),
                  broadcast_object_list=lambda items: items,
-                 format_timestamp=lambda: "now", copy_support_files=Mock(), copy_inference_assets=Mock())
+                 format_timestamp=lambda: "now", format_duration=lambda value: str(value),
+                 copy_support_files=Mock(), copy_inference_assets=Mock())
     exec(compile(module, str(source), "exec", flags=__future__.annotations.compiler_flag), scope)
     return scope
 
@@ -93,7 +94,35 @@ class CheckpointTests(unittest.TestCase):
             self.scope["save_checkpoint"](accelerator, Mock(), "base", "codec", other, {}, {"global_step": 2})
             self.assertEqual(json.loads((other / "trainer_state.json").read_text())["global_step"], 2)
 
-    def run_loop(self, resume=None):
+    def test_tensorboard_lifecycle(self):
+        factory = Mock()
+        fake_module = types.ModuleType("torch.utils.tensorboard")
+        fake_module.SummaryWriter = factory
+        args = argparse.Namespace(tensorboard=True, tensorboard_log_dir=None)
+        accelerator = Mock(is_main_process=True)
+        logger = self.scope["tensorboard_logger"]
+        with patch.dict("sys.modules", {"torch.utils.tensorboard": fake_module}):
+            with logger(args, accelerator, Path("output"), {"learning_rate": 0.01}, None) as writer:
+                self.assertIs(writer, factory.return_value)
+            factory.assert_called_once_with(log_dir=str(Path("output/tensorboard")), purge_step=None, flush_secs=10)
+            writer.close.assert_called_once()
+            factory.reset_mock()
+            args.tensorboard_log_dir = "custom-logs"
+            with self.assertRaisesRegex(RuntimeError, "training failed"):
+                with logger(args, accelerator, Path("output"), {}, {"global_step": 20}):
+                    raise RuntimeError("training failed")
+            self.assertEqual(factory.call_args.kwargs["purge_step"], 21)
+            self.assertEqual(factory.call_args.kwargs["log_dir"], "custom-logs")
+            factory.return_value.close.assert_called_once()
+            factory.reset_mock()
+            for enabled, main in [(False, True), (True, False)]:
+                args.tensorboard = enabled
+                accelerator.is_main_process = main
+                with logger(args, accelerator, Path("output"), {}, None) as writer:
+                    self.assertIsNone(writer)
+            factory.assert_not_called()
+
+    def run_loop(self, resume=None, writer=None):
         class Loader(list):
             generator = Mock()
             def set_epoch(self, epoch):
@@ -113,12 +142,24 @@ class CheckpointTests(unittest.TestCase):
         accelerator.accumulate = accumulate
         accelerator.skip_first_batches.side_effect = lambda data, count: Loader(data[count:])
         args = argparse.Namespace(gradient_accumulation_steps=2, num_epochs=2, max_grad_norm=0,
-                                  logging_steps=100, save_steps=1, seed=42, model_path="base", codec_path="codec")
+                                  logging_steps=1 if writer else 100, save_steps=1, seed=42, model_path="base", codec_path="codec")
         model, optimizer, scheduler, save = Mock(), Mock(), Mock(), Mock()
+        accelerator.gather.return_value.mean.return_value.item.return_value = 0.5
+        scheduler.get_last_lr.return_value = [0.0001]
         self.scope["save_checkpoint"] = save
         self.scope["_training_loop"](accelerator, args, model, loader, optimizer, scheduler,
-                                     None, 4, 2, Path("output"), {"dataset_fingerprint": "hash"}, None, resume)
+                                     None, 4, 2, Path("output"), {"dataset_fingerprint": "hash"}, writer, resume)
         return model, scheduler, save
+
+    def test_tensorboard_metrics_use_resumed_global_steps(self):
+        writer = Mock()
+        self.run_loop({"global_step": 1, "epoch": 0, "next_batch": 2}, writer=writer)
+        losses = [call for call in writer.add_scalar.call_args_list if call.args[0] == "train/loss"]
+        self.assertEqual([call.kwargs["global_step"] for call in losses], [2, 3, 4])
+        self.assertTrue(all(call.args[1] == 0.5 for call in losses))
+        self.assertEqual({call.args[0] for call in writer.add_scalar.call_args_list},
+                         {"train/loss", "train/lr", "train/step_time", "train/steps_per_sec",
+                          "train/samples_per_sec", "train/epoch", "train/eta_seconds"})
 
     def test_mid_epoch_resume_skips_completed_batches(self):
         model, scheduler, save = self.run_loop({"global_step": 1, "epoch": 0, "next_batch": 2})
