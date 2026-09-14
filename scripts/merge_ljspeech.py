@@ -112,10 +112,10 @@ def main(argv=None):
     parser.add_argument("--input", nargs="+", required=True, help="UTF-8 path|text manifests")
     parser.add_argument("--audio-root", help="Relative-path root; default: manifest directory/wavs")
     parser.add_argument("--output-dir", required=True, help="Must not already exist")
-    parser.add_argument("--target-seconds", type=float, default=60)
-    parser.add_argument("--min-seconds", type=float, default=30,
+    parser.add_argument("--target-seconds", type=float, default=120)
+    parser.add_argument("--min-seconds", type=float, default=15,
                         help="Discard output groups shorter than this; 0: keep all")
-    parser.add_argument("--max-seconds", type=float, default=90)
+    parser.add_argument("--max-seconds", type=float, default=150)
     parser.add_argument("--max-clips", type=int, default=0, help="0: unlimited; 4: at most four clips")
     parser.add_argument("--order", choices=["manifest", "natural"], default="manifest")
     parser.add_argument("--text-column", type=int, default=1, help="1: second column; 2: normalized LJSpeech text")
