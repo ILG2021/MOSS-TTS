@@ -18,6 +18,7 @@ class Clip:
     frames: int
     rate: int
     channels: int
+    relative_path: Path | None = None
 
 
 def read_clips(args):
@@ -55,8 +56,12 @@ def read_clips(args):
                 match = re.fullmatch(r"(.*?)(\d+)", path.stem)
                 prefix = match[1] if match else path.stem
                 number = int(match[2]) if match else None
+                try:
+                    relative_path = path.relative_to(root)
+                except ValueError:
+                    relative_path = Path(path.parent.name) / path.name
                 clips.append(Clip(path, text, (str(manifest), str(path.parent), prefix),
-                                  number, info.frames, info.samplerate, info.channels))
+                                  number, info.frames, info.samplerate, info.channels, relative_path))
     if args.order == "natural":
         clips.sort(key=lambda c: (c.group, c.number if c.number is not None else -1))
     return clips
@@ -108,6 +113,8 @@ def main(argv=None):
     parser.add_argument("--audio-root", help="Relative-path root; default: manifest directory/wavs")
     parser.add_argument("--output-dir", required=True, help="Must not already exist")
     parser.add_argument("--target-seconds", type=float, default=60)
+    parser.add_argument("--min-seconds", type=float, default=30,
+                        help="Discard output groups shorter than this; 0: keep all")
     parser.add_argument("--max-seconds", type=float, default=90)
     parser.add_argument("--max-clips", type=int, default=0, help="0: unlimited; 4: at most four clips")
     parser.add_argument("--order", choices=["manifest", "natural"], default="manifest")
@@ -121,31 +128,53 @@ def main(argv=None):
         parser.error("Require 0 < target-seconds <= max-seconds < infinity")
     if args.max_clips < 0 or args.limit < 0 or args.text_column < 1:
         parser.error("max-clips/limit must be nonnegative; text-column must be >= 1")
+    if not 0 <= args.min_seconds < float("inf"):
+        parser.error("Require 0 <= min-seconds < infinity")
     output = Path(args.output_dir).resolve()
     if output.exists() and not args.dry_run:
         parser.error(f"Output already exists; choose a new directory: {output}")
     clips = read_clips(args)
     if not clips:
         parser.error("No input records")
-    groups = list(plan_groups(clips, args.target_seconds, args.max_seconds, args.max_clips))
+    groups = []
+    for group in plan_groups(clips, args.target_seconds, args.max_seconds, args.max_clips):
+        duration = sum(c.frames / c.rate for c in group)
+        if duration < args.min_seconds:
+            print(f"Skipped short group: {group[0].path} -> {group[-1].path.name} "
+                  f"({len(group)} clips, {duration:.2f}s < {args.min_seconds:g}s)")
+        else:
+            groups.append(group)
     if args.limit:
         groups = groups[:args.limit]
+    if not groups:
+        print("No output groups remain after duration filtering; nothing written.")
+        return
+    relatives = []
+    seen_outputs = set()
+    for group in groups:
+        source = group[0].relative_path
+        relative = Path("wavs") / source.with_name(f"{source.stem}_merge.wav")
+        destination = output / relative
+        if destination in seen_outputs:
+            raise ValueError(f"Output filename collision: {relative}; process inputs separately")
+        seen_outputs.add(destination)
+        relatives.append(relative.as_posix())
     durations = [sum(c.frames / c.rate for c in g) for g in groups]
     print(f"Selected {sum(map(len, groups))}/{len(clips)} clips -> {len(groups)} outputs; "
           f"duration min/mean/max: {min(durations):.2f}/{sum(durations)/len(durations):.2f}/{max(durations):.2f}s; "
           f"singletons: {sum(len(g) == 1 for g in groups)}")
     if args.dry_run:
-        for group in groups[:10]:
-            print(f"{group[0].path.name} -> {group[-1].path.name} ({len(group)} clips)")
+        for group, relative in list(zip(groups, relatives))[:10]:
+            print(f"{group[0].path.name} -> {group[-1].path.name} ({len(group)} clips) => {relative}")
         return
     output.mkdir(parents=True, exist_ok=False)
     (output / "wavs").mkdir()
     with (output / "metadata.txt").open("x", encoding="utf-8") as metadata, \
             (output / "train_raw.jsonl").open("x", encoding="utf-8") as train, \
             (output / "sources.jsonl").open("x", encoding="utf-8") as provenance:
-        for index, group in enumerate(groups, 1):
-            relative = f"wavs/merged_{index:07d}.wav"
+        for index, (group, relative) in enumerate(zip(groups, relatives), 1):
             destination = output / relative
+            destination.parent.mkdir(parents=True, exist_ok=True)
             write_group(group, destination)
             text = args.text_joiner.join(c.text for c in group)
             metadata.write(f"{relative}|{text}\n")
