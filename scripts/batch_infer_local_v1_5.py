@@ -42,7 +42,6 @@ def main() -> None:
     parser.add_argument("--encoding", default="utf-8-sig")
     parser.add_argument("--language", default="Chinese", help="Use auto to omit the language tag")
     parser.add_argument("--device", default=None, help="Default: CUDA if available, otherwise CPU")
-    parser.add_argument("--codec-device", default=None)
     parser.add_argument("--codec-offload", action=argparse.BooleanOptionalAction, default=True,
                         help="Move the audio tokenizer to CPU while idle (default: enabled)")
     parser.add_argument("--dtype", choices=["bf16", "fp16", "fp32"], default=None)
@@ -93,8 +92,8 @@ def main() -> None:
     dtype = args.dtype or ("bf16" if torch.device(device).type == "cuda" else "fp32")
     set_seed(args.seed)
     runtime = load_runtime(model_dir=args.model_dir, codec_dir=args.codec_dir,
-                           device=device, codec_device=args.codec_device, dtype=dtype,
-                           codec_compute_dtype="fp32" if torch.device(args.codec_device or device).type == "cpu" else dtype,
+                           device=device, codec_device=device, dtype=dtype,
+                           codec_compute_dtype="fp32" if torch.device(device).type == "cpu" else dtype,
                            attn_implementation=args.attn_implementation, codec_offload=args.codec_offload,
                            warmup=False)
     processor = runtime.processor
@@ -122,16 +121,18 @@ def main() -> None:
             current = groups[start:start + args.batch_size]
             print(f"Generating groups {start + 1}-{start + len(current)}/{len(groups)}", flush=True)
             try:
+                # Reference codes are already encoded, so keep the codec on CPU
+                # while the language model occupies the GPU.
+                conversations = [[processor.build_user_message(
+                    text=group["text"], reference=reference, language=language)] for group in current]
+                batch = processor(conversations, mode="generation")
+                outputs = runtime.model.generate(
+                    input_ids=batch["input_ids"].to(runtime.device),
+                    attention_mask=batch["attention_mask"].to(runtime.device),
+                    max_new_tokens=args.max_new_tokens, do_sample=True,
+                    audio_temperature=1.7, audio_top_p=0.8, audio_top_k=25,
+                    audio_repetition_penalty=1.0)
                 with codec_on_device():
-                    conversations = [[processor.build_user_message(
-                        text=group["text"], reference=reference, language=language)] for group in current]
-                    batch = processor(conversations, mode="generation")
-                    outputs = runtime.model.generate(
-                        input_ids=batch["input_ids"].to(runtime.device),
-                        attention_mask=batch["attention_mask"].to(runtime.device),
-                        max_new_tokens=args.max_new_tokens, do_sample=True,
-                        audio_temperature=1.7, audio_top_p=0.8, audio_top_k=25,
-                        audio_repetition_penalty=1.0)
                     messages = processor.decode(outputs)
                 if len(messages) != len(current):
                     raise RuntimeError("Decoded output count does not match the input batch")
