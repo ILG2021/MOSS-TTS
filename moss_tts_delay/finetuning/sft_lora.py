@@ -732,6 +732,8 @@ def _training_loop(
     completed_epochs = 0
     last_log_time = time.perf_counter()
     last_logged_step = global_step
+    loss_sum = None
+    loss_count = 0
 
     def checkpoint(path, epoch, next_batch):
         if next_batch == len(train_dataloader):
@@ -774,6 +776,10 @@ def _training_loop(
                     use_cache=False,
                 )
                 loss = outputs.loss
+                # Keep only a detached scalar, never the accumulated computation graphs.
+                detached_loss = loss.detach().float()
+                loss_sum = detached_loss if loss_sum is None else loss_sum + detached_loss
+                loss_count += 1
                 accelerator.backward(loss)
 
                 if accelerator.sync_gradients and args.max_grad_norm > 0:
@@ -786,7 +792,9 @@ def _training_loop(
 
             if accelerator.sync_gradients:
                 global_step += 1
-                if global_step % args.logging_steps == 0:
+                if (global_step % args.logging_steps == 0
+                        or batch_index + 1 == len(train_dataloader)
+                        or global_step >= max_train_steps):
                     now = time.perf_counter()
                     steps_since_last_log = max(global_step - last_logged_step, 1)
                     elapsed = max(now - last_log_time, 1e-12)
@@ -796,7 +804,10 @@ def _training_loop(
                     steps_per_sec = steps_since_last_log / elapsed
                     samples_per_sec = (global_batch_size * steps_since_last_log) / elapsed
                     eta_seconds = max(max_train_steps - global_step, 0) / steps_per_sec
-                    logged_loss = accelerator.gather(loss.detach().float().reshape(1)).mean().item()
+                    # Prepared loaders give each rank the same number of microbatches.
+                    # Average microbatch means, then average across ranks.
+                    logged_loss = accelerator.gather((loss_sum / loss_count).reshape(1)).mean().item()
+                    loss_sum, loss_count = None, 0
                     lr_val = lr_scheduler.get_last_lr()[0]
                     accelerator.print(
                         f"[{format_timestamp()}] "

@@ -122,7 +122,18 @@ class CheckpointTests(unittest.TestCase):
                     self.assertIsNone(writer)
             factory.assert_not_called()
 
-    def run_loop(self, resume=None, writer=None):
+    def run_loop(self, resume=None, writer=None, loss_values=None, logging_steps=None):
+        class Scalar:
+            def __init__(self, value):
+                self.value = value
+            def detach(self): return self
+            def float(self): return self
+            def reshape(self, *_): return self
+            def mean(self): return self
+            def item(self): return self.value
+            def __add__(self, other): return Scalar(self.value + other.value)
+            def __truediv__(self, count): return Scalar(self.value / count)
+
         class Loader(list):
             generator = Mock()
             def set_epoch(self, epoch):
@@ -144,12 +155,29 @@ class CheckpointTests(unittest.TestCase):
         args = argparse.Namespace(gradient_accumulation_steps=2, num_epochs=2, max_grad_norm=0,
                                   logging_steps=1 if writer else 100, save_steps=1, seed=42, model_path="base", codec_path="codec")
         model, optimizer, scheduler, save = Mock(), Mock(), Mock(), Mock()
-        accelerator.gather.return_value.mean.return_value.item.return_value = 0.5
+        values = iter(loss_values) if loss_values is not None else None
+        model.side_effect = lambda **kwargs: types.SimpleNamespace(loss=Scalar(next(values) if values is not None else 0.5))
+        accelerator.gather.side_effect = lambda value: value
+        if logging_steps is not None:
+            args.logging_steps = logging_steps
         scheduler.get_last_lr.return_value = [0.0001]
         self.scope["save_checkpoint"] = save
         self.scope["_training_loop"](accelerator, args, model, loader, optimizer, scheduler,
                                      None, 4, 2, Path("output"), {"dataset_fingerprint": "hash"}, writer, resume)
         return model, scheduler, save
+
+    def test_loss_averages_all_microbatches_and_resets(self):
+        writer = Mock()
+        self.run_loop(writer=writer, loss_values=[1, 3, 5, 7, 2, 4, 6, 8])
+        losses = [call.args[1] for call in writer.add_scalar.call_args_list if call.args[0] == "train/loss"]
+        self.assertEqual(losses, [2, 6, 3, 7])
+
+    def test_loss_interval_and_epoch_remainder(self):
+        for interval, expected in ((2, [4, 5]), (3, [4, 3, 7])):
+            writer = Mock()
+            self.run_loop(writer=writer, loss_values=[1, 3, 5, 7, 2, 4, 6, 8], logging_steps=interval)
+            losses = [call.args[1] for call in writer.add_scalar.call_args_list if call.args[0] == "train/loss"]
+            self.assertEqual(losses, expected)
 
     def test_tensorboard_metrics_use_resumed_global_steps(self):
         writer = Mock()
