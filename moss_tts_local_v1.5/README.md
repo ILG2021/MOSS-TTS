@@ -29,6 +29,24 @@ for 48 kHz stereo audio encoding and decoding.
 
 ## Batch Inference
 
+### TXT 按每 4 行批量推理
+
+在仓库根目录运行（使用已安装 v1.5 推理依赖的 Python 环境）：
+
+```bash
+python scripts/batch_infer_local_v1_5.py --input-txt input.txt --reference-audio reference.wav --output-dir outputs/my_batch --model-dir /path/to/MOSS-TTS-Local-Transformer-v1.5 --codec-dir /path/to/MOSS-Audio-Tokenizer-v2
+```
+
+- TXT 默认使用 UTF-8（兼容 BOM），每 4 个原始行组成一个输入，保留组内换行；空行计入行数，全空白组跳过，末尾不足 4 行仍然生成。
+- 所有分组复用同一个参考音频的编码，无需提供参考音频转写文本。
+- 每组输出 `0001.wav`、`0001.txt` 等文件；`manifest.json` 记录原始行号、文本、生成状态和音频时长。输出目录须为空，避免覆盖已有结果。
+- 默认逐组推理；显存充足时可加 `--batch-size 2` 同时生成两组。`--lines-per-group` 可修改每组行数。
+- 默认语言为 `Chinese`，可用 `--language English` 或 `--language auto` 修改。
+- 可用 `--device cuda:0 --codec-device cuda:1` 分配设备，`--dtype fp16` 修改模型精度。
+- `--max-new-tokens` 默认 7500，是每组生成上限；如长文本输出被截断，可提高此值（同时受模型上下文长度限制）。
+- 加 `--dry-run` 可仅导出分组文本和清单，不加载模型；正式推理请换一个空输出目录。
+- 省略 `--model-dir` / `--codec-dir` 时使用官方 Hugging Face 模型 ID。
+
 ```python
 from pathlib import Path
 from tqdm import tqdm
