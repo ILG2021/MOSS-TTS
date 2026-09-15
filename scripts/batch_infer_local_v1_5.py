@@ -48,6 +48,8 @@ def main() -> None:
     parser.add_argument("--attn-implementation", choices=["auto", "sdpa", "eager", "flash_attention_2"], default="auto")
     parser.add_argument("--max-new-tokens", type=positive_int, default=7500)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--silence-ms", type=int, default=500,
+                        help="Silence duration in milliseconds inserted between concatenated segments (default: 500)")
     parser.add_argument("--dry-run", action="store_true", help="Write grouped texts and manifest without loading models")
     args = parser.parse_args()
     if not args.reference_audio.is_file():
@@ -154,10 +156,23 @@ def main() -> None:
                         group.update(status="failed", error=str(exc))
                 save_manifest()
                 raise
-    combined = torch.cat(all_audio, dim=-1)
-    combined_path = args.output_dir / "combined.wav"
-    torchaudio.save(str(combined_path), combined, runtime.sample_rate)
-    print(f"Done: {len(groups)} WAV files saved in {args.output_dir}; combined audio: {combined_path}")
+    if all_audio:
+        silence_samples = int(runtime.sample_rate * (args.silence_ms / 1000.0))
+        if silence_samples > 0 and len(all_audio) > 1:
+            shape = list(all_audio[0].shape)
+            shape[-1] = silence_samples
+            silence = torch.zeros(shape, dtype=all_audio[0].dtype, device=all_audio[0].device)
+            pieces = []
+            for i, audio_seg in enumerate(all_audio):
+                if i > 0:
+                    pieces.append(silence)
+                pieces.append(audio_seg)
+            combined = torch.cat(pieces, dim=-1)
+        else:
+            combined = torch.cat(all_audio, dim=-1)
+        combined_path = args.output_dir / "combined.wav"
+        torchaudio.save(str(combined_path), combined, runtime.sample_rate)
+        print(f"Done: {len(groups)} WAV files saved in {args.output_dir}; combined audio: {combined_path}")
 
 
 if __name__ == "__main__":
