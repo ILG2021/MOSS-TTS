@@ -312,7 +312,8 @@ class RuntimeManager:
         attn_implementation: str,
         codec_weight_dtype: str,
         codec_compute_dtype: str,
-        warmup: bool,
+        codec_offload: bool = True,
+        warmup: bool = True,
     ) -> None:
         self.model_dir = str(model_dir)
         self.lora_dir = str(lora_dir).strip() if lora_dir else None
@@ -325,6 +326,7 @@ class RuntimeManager:
         self.attn_implementation = attn_implementation
         self.codec_weight_dtype = codec_weight_dtype
         self.codec_compute_dtype = codec_compute_dtype
+        self.codec_offload = bool(codec_offload)
         self.warmup = bool(warmup)
         self._lock = threading.Lock()
         self._status_lock = threading.Lock()
@@ -420,6 +422,7 @@ class RuntimeManager:
                         attn_implementation=self.attn_implementation,
                         codec_weight_dtype=self.codec_weight_dtype,
                         codec_compute_dtype=self.codec_compute_dtype,
+                        codec_offload=self.codec_offload,
                         warmup=self.warmup,
                     )
                 except Exception as exc:
@@ -602,6 +605,7 @@ def create_app(
     attn_implementation: str = "flash_attention_2",
     codec_weight_dtype: str = "bf16",
     codec_compute_dtype: str = "bf16",
+    codec_offload: bool = True,
     warmup: bool = True,
     preload: bool = True,
     max_concurrency: int = 1,
@@ -618,6 +622,7 @@ def create_app(
         codec_device=codec_device,
         dtype=dtype,
         attn_implementation=attn_implementation,
+        codec_offload=codec_offload,
         codec_weight_dtype=codec_weight_dtype,
         codec_compute_dtype=codec_compute_dtype,
         warmup=warmup,
@@ -2140,6 +2145,12 @@ def _parse_args() -> argparse.Namespace:
         help="Codec non-quantizer autocast compute dtype.",
     )
     parser.add_argument(
+        "--codec-offload",
+        action=argparse.BooleanOptionalAction,
+        default=os.environ.get("CODEC_OFFLOAD", "1").strip().lower() not in {"0", "false", "no", "off"},
+        help="Move the audio tokenizer/codec to CPU between requests to save GPU memory (default: enabled).",
+    )
+    parser.add_argument(
         "--max-concurrency",
         type=int,
         default=int(os.environ.get("MAX_CONCURRENCY", "1")),
@@ -2185,6 +2196,7 @@ def main() -> None:
         attn_implementation=args.attn_implementation,
         codec_weight_dtype=args.codec_weight_dtype,
         codec_compute_dtype=args.codec_compute_dtype,
+        codec_offload=args.codec_offload,
         warmup=not args.no_warmup,
         preload=not args.no_preload,
         max_concurrency=args.max_concurrency,

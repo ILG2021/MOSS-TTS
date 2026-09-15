@@ -62,6 +62,7 @@ class StreamingRuntime:
     attn_implementation: str
     codec_weight_dtype: str
     codec_compute_dtype: str
+    codec_offload: bool = True
 
 
 @dataclass
@@ -200,6 +201,7 @@ def load_runtime(
     attn_implementation: str = "flash_attention_2",
     codec_weight_dtype: str = "fp32",
     codec_compute_dtype: str = "bf16",
+    codec_offload: bool = True,
     warmup: bool = True,
 ) -> StreamingRuntime:
     model_ref = str(model_dir)
@@ -260,7 +262,10 @@ def load_runtime(
     if hasattr(audio_tokenizer, "set_compute_dtype"):
         audio_tokenizer.set_compute_dtype(codec_compute_dtype)
     if hasattr(audio_tokenizer, "to"):
-        audio_tokenizer.to(resolved_codec_device)
+        # Keep the codec on CPU while idle so the large TTS model has the GPU
+        # to itself.  The streaming worker moves it back for the short decode
+        # window and returns it to CPU when the request finishes.
+        audio_tokenizer.to("cpu" if codec_offload and resolved_codec_device.type == "cuda" else resolved_codec_device)
     if hasattr(audio_tokenizer, "eval"):
         audio_tokenizer.eval()
 
@@ -284,6 +289,7 @@ def load_runtime(
         attn_implementation=resolved_attn_implementation,
         codec_weight_dtype=str(codec_weight_dtype),
         codec_compute_dtype=str(codec_compute_dtype),
+        codec_offload=bool(codec_offload),
     )
     if warmup:
         warmup_streaming_runtime(runtime)
@@ -656,6 +662,9 @@ class StatefulCodecDecoder:
 @torch.inference_mode()
 def warmup_streaming_runtime(runtime: StreamingRuntime, *, codec_frames: int = 4) -> None:
     """Pre-run small TTS and codec steps so the first user stream is hot."""
+    codec = runtime.processor.audio_tokenizer
+    if runtime.codec_offload and runtime.codec_device.type == "cuda":
+        codec.to(runtime.codec_device)
     try:
         request = StreamingRequest(
             text="这是一个流式预热。", language="Chinese", max_new_frames=2, do_sample=False
@@ -692,6 +701,10 @@ def warmup_streaming_runtime(runtime: StreamingRuntime, *, codec_frames: int = 4
             torch.cuda.synchronize(runtime.codec_device)
     except Exception as exc:  # noqa: BLE001
         print(f"[moss_tts_local_v1.5] codec warmup skipped: {exc}")
+    finally:
+        if runtime.codec_offload and runtime.codec_device.type == "cuda":
+            codec.to("cpu")
+            torch.cuda.empty_cache()
 
 
 def _decode_budget_from_stream_state(
@@ -817,8 +830,11 @@ def synthesize_stream(
     decode_output_queue: queue.Queue[dict[str, Any]] = queue.Queue()
 
     def _codec_worker() -> None:
+        codec = runtime.processor.audio_tokenizer
         try:
-            with StatefulCodecDecoder(runtime.processor.audio_tokenizer, n_vq=runtime.n_vq) as decoder:
+            if runtime.codec_offload and runtime.codec_device.type == "cuda":
+                codec.to(runtime.codec_device)
+            with StatefulCodecDecoder(codec, n_vq=runtime.n_vq) as decoder:
                 if prompt_audio_codes is not None and prompt_audio_codes.numel() > 0:
                     _ = decoder.decode_codes(prompt_audio_codes.to(device=decoder.device, dtype=torch.long))
                 while True:
@@ -839,6 +855,9 @@ def synthesize_stream(
         except BaseException as exc:  # noqa: BLE001
             decode_output_queue.put({"type": "error", "error": repr(exc)})
         finally:
+            if runtime.codec_offload and runtime.codec_device.type == "cuda":
+                codec.to("cpu")
+                torch.cuda.empty_cache()
             decode_output_queue.put({"type": "done"})
 
     decoder_thread = threading.Thread(target=_codec_worker, name="moss-tts-local-v1.5-codec-worker", daemon=True)

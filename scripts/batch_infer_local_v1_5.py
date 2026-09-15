@@ -6,6 +6,7 @@ import argparse
 import json
 from pathlib import Path
 import sys
+from contextlib import contextmanager
 
 
 def group_lines(text: str, lines_per_group: int = 4) -> list[dict]:
@@ -42,6 +43,8 @@ def main() -> None:
     parser.add_argument("--language", default="Chinese", help="Use auto to omit the language tag")
     parser.add_argument("--device", default=None, help="Default: CUDA if available, otherwise CPU")
     parser.add_argument("--codec-device", default=None)
+    parser.add_argument("--codec-offload", action=argparse.BooleanOptionalAction, default=True,
+                        help="Move the audio tokenizer to CPU while idle (default: enabled)")
     parser.add_argument("--dtype", choices=["bf16", "fp16", "fp32"], default=None)
     parser.add_argument("--attn-implementation", choices=["auto", "sdpa", "eager", "flash_attention_2"], default="auto")
     parser.add_argument("--max-new-tokens", type=positive_int, default=7500)
@@ -92,26 +95,43 @@ def main() -> None:
     runtime = load_runtime(model_dir=args.model_dir, codec_dir=args.codec_dir,
                            device=device, codec_device=args.codec_device, dtype=dtype,
                            codec_compute_dtype="fp32" if torch.device(args.codec_device or device).type == "cpu" else dtype,
-                           attn_implementation=args.attn_implementation, warmup=False)
+                           attn_implementation=args.attn_implementation, codec_offload=args.codec_offload,
+                           warmup=False)
     processor = runtime.processor
+    codec = processor.audio_tokenizer
+    codec_device = runtime.codec_device
+
+    @contextmanager
+    def codec_on_device():
+        if args.codec_offload and codec_device.type == "cuda":
+            codec.to(codec_device)
+        try:
+            yield
+        finally:
+            if args.codec_offload and codec_device.type == "cuda":
+                codec.to("cpu")
+                torch.cuda.empty_cache()
+
     language = None if args.language.lower() == "auto" else args.language
     with torch.inference_mode():
         # Encode the shared reference only once, then reuse its discrete codes.
-        reference = processor.encode_audios_from_path(str(args.reference_audio.resolve()))
+        with codec_on_device():
+            reference = processor.encode_audios_from_path(str(args.reference_audio.resolve()))
         for start in range(0, len(groups), args.batch_size):
             current = groups[start:start + args.batch_size]
             print(f"Generating groups {start + 1}-{start + len(current)}/{len(groups)}", flush=True)
             try:
-                conversations = [[processor.build_user_message(
-                    text=group["text"], reference=reference, language=language)] for group in current]
-                batch = processor(conversations, mode="generation")
-                outputs = runtime.model.generate(
-                    input_ids=batch["input_ids"].to(runtime.device),
-                    attention_mask=batch["attention_mask"].to(runtime.device),
-                    max_new_tokens=args.max_new_tokens, do_sample=True,
-                    audio_temperature=1.7, audio_top_p=0.8, audio_top_k=25,
-                    audio_repetition_penalty=1.0)
-                messages = processor.decode(outputs)
+                with codec_on_device():
+                    conversations = [[processor.build_user_message(
+                        text=group["text"], reference=reference, language=language)] for group in current]
+                    batch = processor(conversations, mode="generation")
+                    outputs = runtime.model.generate(
+                        input_ids=batch["input_ids"].to(runtime.device),
+                        attention_mask=batch["attention_mask"].to(runtime.device),
+                        max_new_tokens=args.max_new_tokens, do_sample=True,
+                        audio_temperature=1.7, audio_top_p=0.8, audio_top_k=25,
+                        audio_repetition_penalty=1.0)
+                    messages = processor.decode(outputs)
                 if len(messages) != len(current):
                     raise RuntimeError("Decoded output count does not match the input batch")
                 for group, message in zip(current, messages):
