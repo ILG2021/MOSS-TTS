@@ -93,7 +93,8 @@ def main() -> None:
     set_seed(args.seed)
     runtime = load_runtime(model_dir=args.model_dir, codec_dir=args.codec_dir,
                            device=device, codec_device=device, dtype=dtype,
-                           codec_compute_dtype="fp32" if torch.device(device).type == "cpu" else dtype,
+                           codec_weight_dtype="bf16",
+                           codec_compute_dtype="bf16",
                            attn_implementation=args.attn_implementation, codec_offload=args.codec_offload,
                            warmup=False)
     processor = runtime.processor
