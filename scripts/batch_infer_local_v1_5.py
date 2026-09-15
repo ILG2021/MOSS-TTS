@@ -113,6 +113,7 @@ def main() -> None:
                 torch.cuda.empty_cache()
 
     language = None if args.language.lower() == "auto" else args.language
+    all_audio: list[torch.Tensor] = []
     with torch.inference_mode():
         # Encode the shared reference only once, then reuse its discrete codes.
         with codec_on_device():
@@ -141,6 +142,7 @@ def main() -> None:
                     if audio.numel() == 0:
                         raise RuntimeError(f"Empty audio for group {group['index']}")
                     torchaudio.save(str(args.output_dir / group["audio_file"]), audio, runtime.sample_rate)
+                    all_audio.append(audio)
                     group.update(status="done", duration_seconds=audio.shape[-1] / runtime.sample_rate)
                     save_manifest()
                 del outputs, messages, batch
@@ -150,7 +152,10 @@ def main() -> None:
                         group.update(status="failed", error=str(exc))
                 save_manifest()
                 raise
-    print(f"Done: {len(groups)} WAV files saved in {args.output_dir}")
+    combined = torch.cat(all_audio, dim=-1)
+    combined_path = args.output_dir / "combined.wav"
+    torchaudio.save(str(combined_path), combined, runtime.sample_rate)
+    print(f"Done: {len(groups)} WAV files saved in {args.output_dir}; combined audio: {combined_path}")
 
 
 if __name__ == "__main__":
