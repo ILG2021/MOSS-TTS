@@ -10,13 +10,15 @@ from __future__ import annotations
 
 import ctypes
 import logging
+import os
+import sys
 from pathlib import Path
 
 import numpy as np
 
 log = logging.getLogger(__name__)
 
-_LIB_NAME = "libbackbone_bridge.so"
+_LIB_NAME = "backbone_bridge.dll" if sys.platform == "win32" else "libbackbone_bridge.so"
 
 
 def _find_bridge_lib() -> Path:
@@ -31,12 +33,22 @@ def _find_bridge_lib() -> Path:
             return p
     raise FileNotFoundError(
         f"Cannot find {_LIB_NAME}. Compile with:\n"
-        f"  cd {Path(__file__).parent} && bash build_bridge.sh /path/to/llama.cpp"
+        + (
+            f"  powershell -ExecutionPolicy Bypass -File "
+            f"{Path(__file__).parent / 'build_bridge.ps1'} -LlamaCppDir C:\\path\\to\\llama.cpp"
+            if sys.platform == "win32"
+            else f"  cd {Path(__file__).parent} && bash build_bridge.sh /path/to/llama.cpp"
+        )
     )
 
 
 def _load_bridge(lib_path: Path):
     """Load the C bridge and set up function signatures."""
+    if sys.platform == "win32" and hasattr(os, "add_dll_directory"):
+        # Keep the handle alive for as long as the process runs.  The Windows
+        # build script copies llama.cpp and ggml runtime DLLs beside the bridge.
+        global _DLL_DIR_HANDLE
+        _DLL_DIR_HANDLE = os.add_dll_directory(str(lib_path.parent))
     lib = ctypes.CDLL(str(lib_path))
 
     lib.bridge_create.argtypes = [
