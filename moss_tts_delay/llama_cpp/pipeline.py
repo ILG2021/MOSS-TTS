@@ -258,7 +258,10 @@ class PipelineConfig:
     def from_yaml(cls, path: str | Path) -> PipelineConfig:
         import yaml
         path = Path(path).expanduser().resolve()
-        with open(path) as f:
+        # YAML files in this project contain UTF-8 comments.  Windows otherwise
+        # uses the active ANSI code page (often GBK), which raises a
+        # UnicodeDecodeError before PyYAML can parse the file.
+        with open(path, encoding="utf-8") as f:
             data: dict[str, Any] = yaml.safe_load(f) or {}
 
         known = {f.name for f in fields(cls)}

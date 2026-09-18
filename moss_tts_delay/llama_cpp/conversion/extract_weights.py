@@ -53,7 +53,7 @@ def load_source_index(model_dir: Path) -> dict:
     """Load safetensors weight map from model directory."""
     index_path = model_dir / "model.safetensors.index.json"
     if index_path.exists():
-        with open(index_path) as f:
+        with open(index_path, encoding="utf-8") as f:
             return json.load(f)
     single = model_dir / "model.safetensors"
     if single.exists():
@@ -66,7 +66,7 @@ def load_source_index(model_dir: Path) -> dict:
 
 
 def load_source_config(model_dir: Path) -> dict:
-    with open(model_dir / "config.json") as f:
+    with open(model_dir / "config.json", encoding="utf-8") as f:
         return json.load(f)
 
 
@@ -202,7 +202,7 @@ def extract(model_dir: Path, output_dir: Path) -> None:
         "weight_map": backbone_weight_map,
     }
     if total_shards > 1:
-        with open(backbone_dir / "model.safetensors.index.json", "w") as f:
+        with open(backbone_dir / "model.safetensors.index.json", "w", encoding="utf-8") as f:
             json.dump(backbone_index, f, indent=2, sort_keys=True)
         log.info("Wrote backbone index: %d shards, %.2f GB total", total_shards, total_size / 1e9)
     elif total_shards == 1:
@@ -215,7 +215,7 @@ def extract(model_dir: Path, output_dir: Path) -> None:
 
     # Write Qwen3 config
     qwen3_config = build_qwen3_config(moss_config)
-    with open(backbone_dir / "config.json", "w") as f:
+    with open(backbone_dir / "config.json", "w", encoding="utf-8") as f:
         json.dump(qwen3_config, f, indent=2)
     log.info("Wrote backbone config.json")
 
@@ -245,7 +245,7 @@ def extract(model_dir: Path, output_dir: Path) -> None:
         "lm_head_dir": str(head_dir),
         "moss_config": moss_config,
     }
-    with open(output_dir / "extraction_meta.json", "w") as f:
+    with open(output_dir / "extraction_meta.json", "w", encoding="utf-8") as f:
         json.dump(meta, f, indent=2)
     log.info("Wrote extraction_meta.json")
 

@@ -36,7 +36,7 @@ _HARDCODED_DEFAULTS = {
 def _load_defaults() -> dict:
     if _CONFIG_PATH.exists():
         try:
-            with open(_CONFIG_PATH) as f:
+            with open(_CONFIG_PATH, encoding="utf-8") as f:
                 cfg = json.load(f)
             log.debug("Loaded token IDs from %s", _CONFIG_PATH)
             merged = {**_HARDCODED_DEFAULTS, **cfg}
