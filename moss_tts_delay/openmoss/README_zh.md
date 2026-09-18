@@ -49,7 +49,8 @@ git submodule update --init --recursive
 ```powershell
 cmake -S . -B build-cuda -A x64 `
   -DGGML_CUDA=ON `
-  -DCMAKE_CUDA_ARCHITECTURES=native
+  -DCMAKE_CUDA_ARCHITECTURES=native `
+  -T "cuda=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.4"
 cmake --build build-cuda --config Release -j
 ```
 
