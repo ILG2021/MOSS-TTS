@@ -24,8 +24,12 @@ import gradio as gr
 
 
 LANGUAGES = [
-    "Auto", "zh", "en", "yue", "ja", "ko", "fr", "de", "es", "pt",
-    "ru", "ar", "hi", "it", "nl", "pl", "tr", "vi", "th",
+    # Keep these values aligned with the Python/Transformers inference path.
+    # The processor writes the value directly into the MOSS `Language` field;
+    # it is a language tag such as `Chinese`, not an ISO code such as `zh`.
+    "Auto", "Chinese", "Cantonese", "English", "Japanese", "Korean",
+    "French", "German", "Spanish", "Portuguese", "Russian", "Arabic",
+    "Hindi", "Italian", "Dutch", "Polish", "Turkish", "Vietnamese", "Thai",
 ]
 
 
