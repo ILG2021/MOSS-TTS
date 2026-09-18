@@ -263,6 +263,11 @@ def main() -> None:
     parser.add_argument("--model", required=True, help="Quantized backbone GGUF path")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=7860)
+    parser.add_argument(
+        "--root-path",
+        default=None,
+        help="Gradio root path when served behind a reverse proxy, e.g. /moss",
+    )
     parser.add_argument("--openmoss-host", default="127.0.0.1")
     parser.add_argument("--openmoss-port", type=int, default=8080)
     parser.add_argument("--main-gpu", type=int, default=0)
@@ -303,7 +308,10 @@ def main() -> None:
         if seconds is not None:
             print(f"[openmoss] model loaded in {seconds:.2f}s", flush=True)
     build_demo(runtime).queue(max_size=32, default_concurrency_limit=args.parallel).launch(
-        server_name=args.host, server_port=args.port, share=args.share,
+        server_name=args.host,
+        server_port=args.port,
+        root_path=args.root_path,
+        share=args.share,
     )
 
 
