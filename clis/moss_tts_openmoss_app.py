@@ -28,11 +28,6 @@ import gradio as gr
 import numpy as np
 import soundfile as sf
 
-try:
-    import orjson
-except ImportError:
-    orjson = None
-
 if __package__:
     from .tts_chunking import count_chars, iter_text_chunks, reference_tail, transcribe_reference
 else:
@@ -51,8 +46,6 @@ MODE_CONTINUE = "续写"
 MODE_CONTINUE_CLONE = "续写 + 克隆"
 ZH_TOKENS_PER_CHAR = 3.098411951313033
 EN_TOKENS_PER_CHAR = 0.8673376262755219
-REFERENCE_AUDIO_DIR = Path(__file__).resolve().parent.parent / "assets" / "audio"
-EXAMPLE_TEXTS_JSONL_PATH = Path(__file__).resolve().parent.parent / "assets" / "text" / "moss_tts_example_texts.jsonl"
 LANGUAGE_TAG_AUTO = "自动 (缺省)"
 
 LANGUAGE_TAG_MAP: dict[str, str | None] = {
@@ -92,54 +85,6 @@ LANGUAGE_TAG_MAP: dict[str, str | None] = {
 LANGUAGE_TAG_CHOICES = list(LANGUAGE_TAG_MAP.keys())
 
 
-def _parse_example_id(example_id: str) -> tuple[str, int] | None:
-    matched = re.fullmatch(r"(zh|en)/(\d+)", (example_id or "").strip())
-    if matched is None:
-        return None
-    return matched.group(1), int(matched.group(2))
-
-
-def _resolve_reference_audio_path(language: str, index: int) -> Path | None:
-    stem_candidates = [f"reference_{language}_{index}"]
-    for stem in stem_candidates:
-        for ext in (".wav", ".mp3"):
-            audio_path = REFERENCE_AUDIO_DIR / f"{stem}{ext}"
-            if audio_path.exists():
-                return audio_path
-    return None
-
-
-def build_example_rows() -> list[tuple[str, str, str]]:
-    rows: list[tuple[str, str, str]] = []
-    if not EXAMPLE_TEXTS_JSONL_PATH.exists():
-        return rows
-
-    with open(EXAMPLE_TEXTS_JSONL_PATH, "rb") as f:
-        for line in f:
-            if not line.strip():
-                continue
-            if orjson is not None:
-                sample = orjson.loads(line)
-            else:
-                sample = json.loads(line)
-            parsed = _parse_example_id(sample.get("id", ""))
-            if parsed is None:
-                continue
-
-            language, index = parsed
-            text = str(sample.get("text", "")).strip()
-            audio_path = _resolve_reference_audio_path(language, index)
-            if audio_path is None:
-                continue
-
-            rows.append((sample.get("role", f"{language}_{index}"), str(audio_path), text))
-
-    return rows
-
-
-EXAMPLE_ROWS = build_example_rows()
-
-
 def detect_text_language(text: str) -> str:
     zh_chars = len(re.findall(r"[\u4e00-\u9fff]", text))
     en_chars = len(re.findall(r"[A-Za-z]", text))
@@ -159,7 +104,8 @@ def estimate_duration_tokens(text: str) -> tuple[str, int, int, int]:
     factor = ZH_TOKENS_PER_CHAR if language == "zh" else EN_TOKENS_PER_CHAR
     default_tokens = max(1, int(effective_len * factor))
     min_tokens = max(1, int(default_tokens * 0.5))
-    max_tokens = max(min_tokens, int(default_tokens * 1.5))
+    # Gradio Slider requires maximum to be strictly greater than minimum.
+    max_tokens = max(min_tokens + 1, int(default_tokens * 1.5))
     return language, default_tokens, min_tokens, max_tokens
 
 
@@ -222,42 +168,6 @@ def render_mode_hint(reference_audio: str | None, mode_with_reference: str):
     if mode_with_reference in {MODE_CLONE, "Clone"}:
         return "首段：**克隆**（使用上传的参考音频）"
     return f"首段：**续写 + 克隆**  \n> {CONTINUATION_NOTICE}"
-
-
-def apply_example_selection(
-    mode_with_reference: str,
-    duration_control_enabled: bool,
-    duration_tokens: int,
-    subsequent_mode: str,
-    evt: gr.SelectData,
-):
-    if evt is None or evt.index is None:
-        return gr.update(), gr.update(), gr.update(), gr.update(), gr.update(), gr.update()
-
-    if isinstance(evt.index, (tuple, list)):
-        row_idx = int(evt.index[0])
-    else:
-        row_idx = int(evt.index)
-
-    if row_idx < 0 or row_idx >= len(EXAMPLE_ROWS):
-        return gr.update(), gr.update(), gr.update(), gr.update(), gr.update(), gr.update()
-
-    _, audio_path, example_text = EXAMPLE_ROWS[row_idx]
-    duration_slider_update, duration_hint, duration_checkbox_update = update_duration_controls(
-        duration_control_enabled,
-        example_text,
-        duration_tokens,
-        mode_with_reference,
-        subsequent_mode,
-    )
-    return (
-        audio_path,
-        example_text,
-        render_mode_hint(audio_path, mode_with_reference),
-        duration_slider_update,
-        duration_hint,
-        duration_checkbox_update,
-    )
 
 
 def _audio_to_wav_bytes(audio_path: str | Path) -> bytes:
@@ -428,7 +338,7 @@ class OpenMossRuntime:
         normalized_language = normalize_language_tag(language_tag)
         if normalized_language is not None:
             payload["language"] = normalized_language
-        if adapter and adapter not in {"Base", "Base (基座)"}:
+        if adapter and adapter not in {"Base", "Base (原版)"}:
             payload["lora"] = adapter
         if expected_tokens is not None and expected_tokens > 0:
             payload["token_count"] = int(expected_tokens)
@@ -633,7 +543,8 @@ def run_inference(
         + "\n".join(details)
     )
 
-    return (output_rate, concatenated_audio), status_text
+    gradio_audio = (np.clip(concatenated_audio, -1, 1) * 32767).astype(np.int16)
+    return (output_rate, gradio_audio), status_text
 
 
 def build_demo(runtime: OpenMossRuntime, args: argparse.Namespace) -> gr.Blocks:
@@ -672,7 +583,7 @@ def build_demo(runtime: OpenMossRuntime, args: argparse.Namespace) -> gr.Blocks:
                 )
                 subsequent_mode = gr.Radio(
                     choices=[MODE_CLONE, MODE_CONTINUE_CLONE],
-                    value=MODE_CONTINUE_CLONE,
+                    value=MODE_CLONE,
                     label="后续段模式",
                     info="克隆使用上传音频（未上传则直接生成）；续写+克隆使用前一段尾部音频。",
                 )
@@ -745,16 +656,6 @@ def build_demo(runtime: OpenMossRuntime, args: argparse.Namespace) -> gr.Blocks:
                 output_audio = gr.Audio(label="输出音频", type="numpy", autoplay=True)
                 run_btn = gr.Button("开始生成语音", variant="primary")
                 status = gr.Textbox(label="运行状态与详情", lines=4, interactive=False)
-                examples_table = gr.Dataframe(
-                    headers=["参考音色", "示例待生成文本"],
-                    value=[[name, text] for name, _, text in EXAMPLE_ROWS],
-                    datatype=["str", "str"],
-                    row_count=(len(EXAMPLE_ROWS), "fixed") if EXAMPLE_ROWS else (0, "dynamic"),
-                    col_count=(2, "fixed"),
-                    interactive=False,
-                    wrap=True,
-                    label="官方示例（点击表格行即可快速填入）",
-                )
 
         reference_audio.change(
             fn=render_mode_hint,
@@ -786,19 +687,6 @@ def build_demo(runtime: OpenMossRuntime, args: argparse.Namespace) -> gr.Blocks:
             inputs=[duration_control_enabled, text, duration_tokens, mode_with_reference, subsequent_mode],
             outputs=[duration_tokens, duration_hint, duration_control_enabled],
         )
-        examples_table.select(
-            fn=apply_example_selection,
-            inputs=[mode_with_reference, duration_control_enabled, duration_tokens, subsequent_mode],
-            outputs=[
-                reference_audio,
-                text,
-                mode_hint,
-                duration_tokens,
-                duration_hint,
-                duration_control_enabled,
-            ],
-        )
-
         run_btn.click(
             fn=lambda text, reference_audio, mode_with_reference, duration_control_enabled, duration_tokens, language_tag, adapter, temperature, top_p, top_k, repetition_penalty, max_new_tokens, chunk_chars, subsequent_mode: run_inference(
                 text=text,
