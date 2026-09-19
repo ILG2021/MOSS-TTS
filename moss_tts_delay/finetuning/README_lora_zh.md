@@ -24,13 +24,33 @@ Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 
 以下命令直接运行 Python 训练入口，无需启动 `.sh` 脚本。PowerShell 使用反引号 `` ` `` 续行；为便于复制，也可将整条命令写成一行。文档中的相对路径均相对于仓库根目录。
 
-数据格式与预处理方式见 [原微调文档](README_zh.md)。未编码的数据先执行：
+数据格式与预处理方式见 [原微调文档](README_zh.md)。如果原始数据是连续编号的 LJSpeech
+短音频，可先按推荐的约 2 分钟长度合并。先用 `--dry-run` 检查分组计划：
+
+```powershell
+python scripts\merge_ljspeech.py `
+  --input "D:\dataset\metadata.txt" `
+  --output-dir "D:\dataset\merged_2min" `
+  --target-seconds 120 --max-seconds 150 --dry-run
+```
+
+确认后去掉 `--dry-run` 生成合并数据：
+
+```powershell
+python scripts\merge_ljspeech.py `
+  --input "D:\dataset\metadata.txt" `
+  --output-dir "D:\dataset\merged_2min" `
+  --target-seconds 120 --max-seconds 150
+```
+
+该命令会生成 `merged_2min\train_raw.jsonl`；完整参数和输入约束见
+[`scripts/merge_ljspeech.md`](../../scripts/merge_ljspeech.md)。未编码的数据再执行：
 
 ```powershell
 python moss_tts_delay\finetuning\prepare_data.py `
   --model-path OpenMOSS-Team/MOSS-TTS-v1.5 `
   --codec-path OpenMOSS-Team/MOSS-Audio-Tokenizer `
-  --input-jsonl train_raw.jsonl --output-jsonl train_with_codes.jsonl `
+  --input-jsonl D:\dataset\merged_2min\train_raw.jsonl --output-jsonl train_with_codes.jsonl `
   --device auto
 ```
 
@@ -58,7 +78,7 @@ python -m accelerate.commands.launch --num_processes 1 moss_tts_delay\finetuning
 
 先使用上述 batch size 1、BF16、梯度检查点和 SDPA 配置，并在命令末尾增加
 `--max-train-steps 10` 验证训练和保存，正式训练时删除该参数。
-建议先用 5～15 秒音频切片测试，目标音频和参考音频均提前编码。
+建议使用约 2 分钟的音频素材，目标音频和参考音频均提前编码。
 当前脚本不会自动截断超长样本；如显存不足，优先缩短单条音频和参考音频长度。
 梯度累积不会减少单条样本的显存占用。
 

@@ -14,20 +14,20 @@
 先检查计划（不写文件）：
 
 ```powershell
-python scripts/merge_ljspeech.py --input "D:/dataset/metadata.txt" --output-dir "D:/dataset/merged_preview" --target-seconds 60 --max-seconds 90 --dry-run
+python scripts/merge_ljspeech.py --input "D:/dataset/metadata.txt" --output-dir "D:/dataset/merged_preview" --target-seconds 120 --max-seconds 150 --dry-run
 ```
 
 生成前 20 条试听：
 
 ```powershell
-python scripts/merge_ljspeech.py --input "D:/dataset/metadata.txt" --output-dir "D:/dataset/merged_preview" --target-seconds 60 --max-seconds 90 --limit 20
+python scripts/merge_ljspeech.py --input "D:/dataset/metadata.txt" --output-dir "D:/dataset/merged_preview" --target-seconds 120 --max-seconds 150 --limit 20
 ```
 
 确认后换一个新输出目录、去掉 `--limit 20` 处理全量。`--max-clips 4` 限制最多四条一组，并非保证每组四条。
 
 默认保持清单顺序。只有同一输入清单、同一文件夹、文件名末尾数字之前的前缀相同、编号递增 1 且采样率/声道相同，才会拼接。遇到编号缺口或格式变化就另起一组；没有数字编号的文件单独保留。若清单是 1、10、2 这种顺序，可加 `--order natural`，但应先确认编号确实代表时间顺序。
 
-累计达到目标时长就结束；加入下一条会超过最大时长时提前结束。分组完成后，默认丢弃总时长不足 30 秒的组（包括孤立单条和尾部短组），逐组打印来源、条数和时长；恰好 30 秒保留。可用 `--min-seconds` 调整阈值，`--min-seconds 0` 保留全部。过滤发生在 `--limit` 之前；全部被过滤时仅打印提示，不创建输出目录。单条已超过最大时长、重复路径、缺失文件、空文本会报错。脚本不做语义分段或声场检测：同前缀连续编号仍可能不是连续录音，需人工抽查。
+默认目标时长为 120 秒（约 2 分钟），最大时长为 150 秒。累计达到目标时长就结束；加入下一条会超过最大时长时提前结束。分组完成后，默认丢弃总时长不足 15 秒的组（包括孤立单条和尾部短组），逐组打印来源、条数和时长；恰好 15 秒保留。可用 `--min-seconds` 调整阈值，`--min-seconds 0` 保留全部。过滤发生在 `--limit` 之前；全部被过滤时仅打印提示，不创建输出目录。单条已超过最大时长、重复路径、缺失文件、空文本会报错。脚本不做语义分段或声场检测：同前缀连续编号仍可能不是连续录音，需人工抽查。
 
 直接连接波形，保留原始静音；不重采样、不淡化、不插入静音。输出 float32 WAV，避免额外 PCM 量化，但比 PCM16 更占磁盘。采样率和声道保持原样。默认中文文本直接连接，不添加标点；英文可以用 `--text-joiner " "`。
 
