@@ -15,6 +15,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import tempfile
 import threading
@@ -171,15 +172,47 @@ def render_mode_hint(reference_audio: str | None, mode_with_reference: str):
 
 
 def _audio_to_wav_bytes(audio_path: str | Path) -> bytes:
-    """Read any audio file and return valid 16-bit PCM RIFF/WAVE bytes."""
+    """Decode common audio formats and return 16-bit PCM RIFF/WAVE bytes."""
     p = Path(audio_path)
-    with open(p, "rb") as f:
-        head = f.read(12)
-    if len(head) >= 12 and head.startswith(b"RIFF") and head[8:12] == b"WAVE":
-        with open(p, "rb") as f:
-            return f.read()
+    if not p.is_file():
+        raise FileNotFoundError(f"找不到参考音频：{p}")
 
-    data, sr = sf.read(str(p), dtype="float32")
+    try:
+        data, sr = sf.read(str(p), dtype="float32", always_2d=False)
+    except (OSError, RuntimeError) as soundfile_error:
+        ffmpeg = shutil.which("ffmpeg")
+        if ffmpeg is None:
+            raise RuntimeError(
+                f"无法解码参考音频 {p.suffix or '(无扩展名)'}；"
+                "请安装 FFmpeg，或上传 WAV、FLAC、OGG、MP3 等 SoundFile 支持的格式。"
+            ) from soundfile_error
+
+        with tempfile.TemporaryDirectory(prefix="moss-audio-convert-") as temp_dir:
+            converted = Path(temp_dir) / "reference.wav"
+            completed = subprocess.run(
+                [
+                    ffmpeg,
+                    "-nostdin",
+                    "-hide_banner",
+                    "-loglevel",
+                    "error",
+                    "-y",
+                    "-i",
+                    str(p),
+                    "-c:a",
+                    "pcm_s16le",
+                    str(converted),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=120,
+                check=False,
+            )
+            if completed.returncode != 0 or not converted.is_file():
+                detail = completed.stderr.strip() or f"FFmpeg 退出码 {completed.returncode}"
+                raise RuntimeError(f"无法解码参考音频 {p.name}：{detail}") from soundfile_error
+            return converted.read_bytes()
+
     buf = io.BytesIO()
     sf.write(buf, data, sr, format="WAV", subtype="PCM_16")
     return buf.getvalue()
