@@ -551,13 +551,19 @@ def build_demo(runtime: OpenMossRuntime, args: argparse.Namespace) -> gr.Blocks:
     with gr.Blocks(title="MOSS-TTS · openmoss") as demo:
         gr.Markdown(
             """
-            ### MOSS-TTS v1.5 · openmoss（C++ 原生后端）
             支持直接生成、音色克隆、续写 + 克隆、多语言标签以及停顿标记合成。
             """
         )
 
         with gr.Row(equal_height=False):
             with gr.Column(scale=3):
+                adapter = gr.Dropdown(
+                    choices=["Base (原版)", *runtime.adapters],
+                    value="Base (原版)",
+                    label="音色",
+                    visible=bool(runtime.adapters),
+                    info="选择已预载的音色。",
+                )
                 text = gr.Textbox(
                     label="待合成文本",
                     lines=9,
@@ -593,13 +599,6 @@ def build_demo(runtime: OpenMossRuntime, args: argparse.Namespace) -> gr.Blocks:
                     value="中文 (Chinese)",
                     label="语言标签",
                     info="指定待生成文本的语种，非中英文时建议显式指定。",
-                )
-                adapter = gr.Dropdown(
-                    choices=["Base (原版)", *runtime.adapters],
-                    value="Base (原版)",
-                    label="LoRA 音色",
-                    visible=bool(runtime.adapters),
-                    info="选择已预载的 LoRA 音色适配器（通过 --lora 参数配置）。",
                 )
                 duration_control_enabled = gr.Checkbox(
                     value=False,
