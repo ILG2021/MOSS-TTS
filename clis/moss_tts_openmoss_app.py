@@ -595,8 +595,8 @@ def build_demo(runtime: OpenMossRuntime, args: argparse.Namespace) -> gr.Blocks:
                     info="指定待生成文本的语种，非中英文时建议显式指定。",
                 )
                 adapter = gr.Dropdown(
-                    choices=["Base (基座)", *runtime.adapters],
-                    value="Base (基座)",
+                    choices=["Base (原版)", *runtime.adapters],
+                    value="Base (原版)",
                     label="LoRA 音色",
                     visible=bool(runtime.adapters),
                     info="选择已预载的 LoRA 音色适配器（通过 --lora 参数配置）。",
