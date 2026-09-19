@@ -4,6 +4,7 @@ import json
 import math
 from pathlib import Path
 import re
+import threading
 
 
 def count_chars(text):
@@ -92,31 +93,34 @@ def reference_tail(audio, sample_rate):
 
 _ASR_MODEL = None
 _ASR_CONFIG = None
+_ASR_LOAD_LOCK = threading.Lock()
 
 
 def load_asr(model_path="large-v3-turbo", device="cpu"):
     global _ASR_MODEL, _ASR_CONFIG
     current_config = (model_path, device)
-    if _ASR_MODEL is not None:
-        if _ASR_CONFIG == current_config:
+    with _ASR_LOAD_LOCK:
+        if _ASR_MODEL is not None and _ASR_CONFIG == current_config:
             return _ASR_MODEL
-        # 类型/设备发生改变，释放旧模型显存
-        _ASR_MODEL = None
-        _ASR_CONFIG = None
-        gc.collect()
+        if _ASR_MODEL is not None:
+            # 类型/设备发生改变，释放旧模型显存
+            _ASR_MODEL = None
+            _ASR_CONFIG = None
+            gc.collect()
 
-    try:
-        from faster_whisper import WhisperModel
-    except ImportError as exc:
-        raise RuntimeError('请安装 ASR 依赖：pip install -e ".[app-asr]"') from exc
+        try:
+            from faster_whisper import WhisperModel
+        except ImportError as exc:
+            raise RuntimeError('请安装 ASR 依赖：pip install -e ".[app-asr]"') from exc
 
-    _ASR_MODEL = WhisperModel(
-        model_path,
-        device=device,
-        compute_type="int8" if device == "cpu" else "float16",
-    )
-    _ASR_CONFIG = current_config
-    return _ASR_MODEL
+        model = WhisperModel(
+            model_path,
+            device=device,
+            compute_type="int8" if device == "cpu" else "float16",
+        )
+        _ASR_MODEL = model
+        _ASR_CONFIG = current_config
+        return model
 
 
 MOSS_TO_WHISPER_LANGUAGE = {
