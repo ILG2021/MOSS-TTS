@@ -611,6 +611,7 @@ def create_app(
     max_concurrency: int = 1,
     job_ttl_seconds: float = 900.0,
     stream_stall_timeout_seconds: float = 30.0,
+    root_path: str = "",
 ) -> FastAPI:
     runtime_manager = RuntimeManager(
         model_dir=str(model_dir),
@@ -641,7 +642,11 @@ def create_app(
         jobs.start_reaper()
         yield
 
-    app = FastAPI(title="MOSS-TTS Local v1.5 Realtime Streaming", lifespan=lifespan)
+    app = FastAPI(
+        title="MOSS-TTS Local v1.5 Realtime Streaming",
+        lifespan=lifespan,
+        root_path=root_path,
+    )
 
     @app.get("/", response_class=HTMLResponse)
     async def index() -> HTMLResponse:
@@ -2112,6 +2117,11 @@ def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run the MOSS-TTS Local v1.5 realtime streaming app.")
     parser.add_argument("--host", default=os.environ.get("HOST", "127.0.0.1"))
     parser.add_argument("--port", type=int, default=int(os.environ.get("PORT", "7860")))
+    parser.add_argument(
+        "--root-path",
+        default=os.environ.get("ROOT_PATH", ""),
+        help="ASGI root path when served behind a reverse proxy, e.g. /moss.",
+    )
     parser.add_argument("--model-dir", default=os.environ.get("MODEL_DIR", str(DEFAULT_MODEL_DIR)))
     parser.add_argument(
         "--lora-dir",
@@ -2202,6 +2212,7 @@ def main() -> None:
         max_concurrency=args.max_concurrency,
         job_ttl_seconds=args.job_ttl_seconds,
         stream_stall_timeout_seconds=args.stream_stall_timeout_seconds,
+        root_path=args.root_path,
     )
     uvicorn.run(app, host=args.host, port=int(args.port))
 
