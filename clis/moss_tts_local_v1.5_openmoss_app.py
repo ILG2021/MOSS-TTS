@@ -130,6 +130,12 @@ class OpenMossLocalRuntime(shared.OpenMossRuntime):
 
     def register_voice(self, voice_id: str, audio_path: str, transcript: str) -> None:
         self.ensure_started()
+        info = self._server_info() or {}
+        if not info.get("voice_registry", False):
+            raise RuntimeError(
+                "当前 moss-tts-server 未启用 voice registry；请重新编译并重启本仓库的 "
+                "server，或启动时添加 --voice-dir voices"
+            )
         boundary = f"----openmoss-{uuid.uuid4().hex}"
         wav = shared._audio_to_wav_bytes(audio_path)
         parts = []
@@ -138,8 +144,12 @@ class OpenMossLocalRuntime(shared.OpenMossRuntime):
         parts.append(f"--{boundary}\r\nContent-Disposition: form-data; name=\"audio\"; filename=\"reference.wav\"\r\nContent-Type: audio/wav\r\n\r\n".encode() + wav + b"\r\n")
         parts.append(f"--{boundary}--\r\n".encode())
         req = urllib.request.Request(f"{self.base_url}/v1/voices", data=b"".join(parts), headers={"Content-Type": f"multipart/form-data; boundary={boundary}"}, method="POST")
-        with urllib.request.urlopen(req, timeout=self.args.request_timeout):
-            pass
+        try:
+            with urllib.request.urlopen(req, timeout=self.args.request_timeout):
+                pass
+        except urllib.error.HTTPError as exc:
+            detail = exc.read().decode("utf-8", errors="replace")
+            raise RuntimeError(f"注册批量参考音色失败（HTTP {exc.code}）：{detail}") from exc
 
     def delete_voice(self, voice_id: str) -> None:
         req = urllib.request.Request(f"{self.base_url}/v1/voices/{voice_id}", method="DELETE")
@@ -393,7 +403,13 @@ def run_batch_inference(
             details.append(f"[{position}/{len(rows)}] {candidate}")
     finally:
         if voice_id:
-            runtime.delete_voice(voice_id)
+            try:
+                runtime.delete_voice(voice_id)
+            except Exception as cleanup_error:
+                print(
+                    f"[openmoss-local] 清理临时 voice {voice_id} 失败：{cleanup_error}",
+                    flush=True,
+                )
 
     zip_path = runtime.output_dir / (
         f"openmoss-local-batch-{time.strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:8]}.zip"
@@ -438,7 +454,7 @@ def build_demo(runtime: OpenMossLocalRuntime, args: argparse.Namespace) -> gr.Bl
                 )
                 mode_hint = gr.Markdown(shared.render_mode_hint(None, shared.MODE_CLONE))
                 language_tag = gr.Dropdown(
-                    choices=shared.LANGUAGE_TAG_CHOICES, value="中文 (Chinese)", label="语言标签",
+                    choices=shared.LANGUAGE_TAG_CHOICES, value="自动 (缺省)", label="语言标签",
                 )
                 duration_control_enabled = gr.Checkbox(
                     value=False, label="开启时长控制（期望音频 Token 数，仅作用于克隆段）",
@@ -481,8 +497,8 @@ def build_demo(runtime: OpenMossLocalRuntime, args: argparse.Namespace) -> gr.Bl
 
         common_inputs = [
             text, reference_audio, mode_with_reference, duration_control_enabled,
-            duration_tokens, language_tag, adapter, temperature, top_p, top_k,
-            repetition_penalty, max_new_tokens, chunk_chars, subsequent_mode,
+            duration_tokens, language_tag, temperature, top_p, top_k,
+            repetition_penalty, max_new_tokens, chunk_chars, subsequent_mode, adapter,
         ]
         run_btn.click(
             fn=lambda *values: run_inference(

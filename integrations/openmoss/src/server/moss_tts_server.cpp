@@ -835,6 +835,18 @@ int main(int argc, char ** argv) {
         std::vector<RefEntry> refs;
         if (!extract_references(body, refs, err)) return false;
         if (refs.empty()) return true;
+        // A registered Local voice already supplies the audio codes.  In that
+        // case ref_text is the transcript for continuation, not an incomplete
+        // inline reference.
+        const bool has_registered_voice =
+            body.contains("voice") && body["voice"].is_string() &&
+            !body["voice"].get<std::string>().empty() &&
+            body["voice"].get<std::string>() != "default";
+        if (!delay_arch && has_registered_voice && refs.size() == 1 &&
+            refs[0].b64.empty() && !refs[0].text.empty()) {
+            req.ref_text = refs[0].text;
+            return true;
+        }
         for (const auto & r : refs) {
             if (r.b64.empty()) {
                 err = "ref_text was supplied without reference audio; continuation "
