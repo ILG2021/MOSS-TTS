@@ -75,6 +75,7 @@ class OpenMossLocalRuntime(shared.OpenMossRuntime):
         repetition_penalty: float,
         max_new_tokens: int,
         adapter: str = "Base",
+        voice_id: str | None = None,
     ) -> tuple[int, np.ndarray, float]:
         self.ensure_started()
         payload = {
@@ -95,7 +96,11 @@ class OpenMossLocalRuntime(shared.OpenMossRuntime):
             payload["lora"] = adapter
         if expected_tokens is not None and expected_tokens > 0:
             payload["token_count"] = int(expected_tokens)
-        if reference_audio:
+        if voice_id:
+            payload["voice"] = voice_id
+            if ref_text:
+                payload["ref_text"] = ref_text
+        elif reference_audio:
             wav_bytes = shared._audio_to_wav_bytes(reference_audio)
             payload["reference_wav_b64"] = base64.b64encode(wav_bytes).decode("ascii")
             if ref_text:
@@ -123,6 +128,28 @@ class OpenMossLocalRuntime(shared.OpenMossRuntime):
             )
         return sample_rate, audio.astype(np.float32, copy=False), elapsed
 
+    def register_voice(self, voice_id: str, audio_path: str, transcript: str) -> None:
+        self.ensure_started()
+        boundary = f"----openmoss-{uuid.uuid4().hex}"
+        wav = shared._audio_to_wav_bytes(audio_path)
+        parts = []
+        for name, value in (("voice_id", voice_id), ("transcript", transcript)):
+            parts.append(f"--{boundary}\r\nContent-Disposition: form-data; name=\"{name}\"\r\n\r\n{value}\r\n".encode())
+        parts.append(f"--{boundary}\r\nContent-Disposition: form-data; name=\"audio\"; filename=\"reference.wav\"\r\nContent-Type: audio/wav\r\n\r\n".encode() + wav + b"\r\n")
+        parts.append(f"--{boundary}--\r\n".encode())
+        req = urllib.request.Request(f"{self.base_url}/v1/voices", data=b"".join(parts), headers={"Content-Type": f"multipart/form-data; boundary={boundary}"}, method="POST")
+        with urllib.request.urlopen(req, timeout=self.args.request_timeout):
+            pass
+
+    def delete_voice(self, voice_id: str) -> None:
+        req = urllib.request.Request(f"{self.base_url}/v1/voices/{voice_id}", method="DELETE")
+        try:
+            with urllib.request.urlopen(req, timeout=30):
+                pass
+        except urllib.error.HTTPError as exc:
+            if exc.code != 404:
+                raise
+
 
 def _stereo_tail(audio: np.ndarray, sample_rate: int) -> np.ndarray:
     """Return at most ten seconds of sample-major stereo audio."""
@@ -143,7 +170,7 @@ def run_inference(
     text, reference_audio, mode_with_reference, duration_control_enabled,
     duration_tokens, language_tag, temperature, top_p, top_k,
     repetition_penalty, max_new_tokens, chunk_chars, subsequent_mode, adapter,
-    runtime, asr_model, asr_device, save_output=True,
+    runtime, asr_model, asr_device, save_output=True, voice_id=None, initial_ref_text=None,
 ):
     valid_modes = {
         shared.MODE_CLONE, shared.MODE_CONTINUE_CLONE,
@@ -177,8 +204,8 @@ def run_inference(
         if index == 0 or mode in {shared.MODE_CLONE, "Clone"}:
             current_reference = reference_audio
         continuation = mode in {shared.MODE_CONTINUE_CLONE, "Continuation + Clone"}
-        transcript = ""
-        if current_reference and continuation:
+        transcript = initial_ref_text if index == 0 and continuation else ""
+        if current_reference and continuation and not (index == 0 and initial_ref_text):
             try:
                 transcript = transcribe_reference(
                     current_reference, asr_model, asr_device, asr_language
@@ -227,6 +254,7 @@ def run_inference(
             repetition_penalty=repetition_penalty,
             max_new_tokens=max_new_tokens,
             adapter=adapter,
+            voice_id=voice_id if voice_id and (index == 0 or not continuation) else None,
         )
         if results and sample_rate != output_rate:
             raise RuntimeError("分段音频采样率不一致")
@@ -315,7 +343,20 @@ def run_batch_inference(
     details: list[str] = []
     started = time.monotonic()
 
-    for position, (line_number, body) in enumerate(rows, 1):
+    voice_id = None
+    initial_ref_text = None
+    if reference_audio:
+        if mode_with_reference in {shared.MODE_CONTINUE_CLONE, "Continuation + Clone"}:
+            initial_ref_text = transcribe_reference(
+                reference_audio,
+                asr_model,
+                asr_device,
+                shared.normalize_language_tag(language_tag),
+            )
+        voice_id = f"batch_{uuid.uuid4().hex}"
+        runtime.register_voice(voice_id, reference_audio, initial_ref_text or "-")
+    try:
+        for position, (line_number, body) in enumerate(rows, 1):
         audio_result, _ = run_inference(
             text=body,
             reference_audio=reference_audio,
@@ -335,6 +376,8 @@ def run_batch_inference(
             asr_model=asr_model,
             asr_device=asr_device,
             save_output=False,
+            voice_id=voice_id,
+            initial_ref_text=initial_ref_text,
         )
         sample_rate, pcm = audio_result
         stem = f"{line_number:04d}_{sanitize_filename_text(body)}"
@@ -348,6 +391,9 @@ def run_batch_inference(
         sf.write(output_path, np.asarray(pcm, dtype=np.int16), sample_rate, subtype="PCM_16")
         generated.append(output_path)
         details.append(f"[{position}/{len(rows)}] {candidate}")
+    finally:
+        if voice_id:
+            runtime.delete_voice(voice_id)
 
     zip_path = runtime.output_dir / (
         f"openmoss-local-batch-{time.strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:8]}.zip"

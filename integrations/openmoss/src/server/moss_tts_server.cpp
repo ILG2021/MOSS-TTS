@@ -661,7 +661,7 @@ int main(int argc, char ** argv) {
     bool skip_codec   = false;
     bool codec_cpu    = false;
     DelayTemplate tpl = DelayTemplate::Auto;
-    std::string voice_dir;
+    std::string voice_dir = "voices";
     std::string webui_dir_arg;
     bool no_webui     = false;
     std::vector<std::pair<std::string, std::string>> lora_paths;
