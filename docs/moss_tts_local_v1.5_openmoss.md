@@ -18,8 +18,13 @@ the Local Transformer and Audio Tokenizer v2 checkpoints:
 python integrations/openmoss/scripts/convert_hf_to_gguf.py `
   --moss-tts OpenMOSS-Team/MOSS-TTS-Local-Transformer-v1.5 `
   --codec OpenMOSS-Team/MOSS-Audio-Tokenizer-v2 `
+  --sidecar-dtype bf16 `
   --output integrations/openmoss/weights/moss-tts-local.gguf
 ```
+
+The converter always stores Local Transformer audio embedding tables as F16,
+which is required by the native per-codebook row reader. Other sidecar tensors
+continue to use the selected sidecar dtype.
 
 Keep `moss-tts-local.gguf` and `moss-tts-local.extras.gguf` in the same
 directory. The sidecar contains the 12 local codebook heads, local transformer,

@@ -1077,7 +1077,11 @@ def write_moss_sidecar(out_gguf: Path,
     for name, arr in fam.collect_extras(moss_dir, moss_config):
         if name.startswith("moss.audio_embed."):
             n_audio_embed += 1
-        effective = _add_sidecar_tensor(writer, name, arr, sidecar_dtype)
+        # LocalFrameDecoder reads individual embedding rows directly from the
+        # backend as fp16.  Keep these tables fp16 even when the rest of the
+        # sidecar is BF16 or Q8_0.
+        tensor_dtype = "f16" if name.startswith("moss.audio_embed.") else sidecar_dtype
+        effective = _add_sidecar_tensor(writer, name, arr, tensor_dtype)
         type_counts[effective] += 1
         audio_count += 1
     log.info("added %d MOSS audio/head tensors (%s)",
