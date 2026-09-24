@@ -357,40 +357,40 @@ def run_batch_inference(
         runtime.register_voice(voice_id, reference_audio, initial_ref_text or "-")
     try:
         for position, (line_number, body) in enumerate(rows, 1):
-        audio_result, _ = run_inference(
-            text=body,
-            reference_audio=reference_audio,
-            mode_with_reference=mode_with_reference,
-            duration_control_enabled=duration_control_enabled,
-            duration_tokens=duration_tokens,
-            language_tag=language_tag,
-            temperature=temperature,
-            top_p=top_p,
-            top_k=top_k,
-            repetition_penalty=repetition_penalty,
-            max_new_tokens=max_new_tokens,
-            chunk_chars=chunk_chars,
-            subsequent_mode=subsequent_mode,
-            adapter=adapter,
-            runtime=runtime,
-            asr_model=asr_model,
-            asr_device=asr_device,
-            save_output=False,
-            voice_id=voice_id,
-            initial_ref_text=initial_ref_text,
-        )
-        sample_rate, pcm = audio_result
-        stem = f"{line_number:04d}_{sanitize_filename_text(body)}"
-        candidate = f"{stem}.wav"
-        duplicate = 2
-        while candidate.casefold() in used_names:
-            candidate = f"{stem}_{duplicate}.wav"
-            duplicate += 1
-        used_names.add(candidate.casefold())
-        output_path = batch_dir / candidate
-        sf.write(output_path, np.asarray(pcm, dtype=np.int16), sample_rate, subtype="PCM_16")
-        generated.append(output_path)
-        details.append(f"[{position}/{len(rows)}] {candidate}")
+            audio_result, _ = run_inference(
+                text=body,
+                reference_audio=reference_audio,
+                mode_with_reference=mode_with_reference,
+                duration_control_enabled=duration_control_enabled,
+                duration_tokens=duration_tokens,
+                language_tag=language_tag,
+                temperature=temperature,
+                top_p=top_p,
+                top_k=top_k,
+                repetition_penalty=repetition_penalty,
+                max_new_tokens=max_new_tokens,
+                chunk_chars=chunk_chars,
+                subsequent_mode=subsequent_mode,
+                adapter=adapter,
+                runtime=runtime,
+                asr_model=asr_model,
+                asr_device=asr_device,
+                save_output=False,
+                voice_id=voice_id,
+                initial_ref_text=initial_ref_text,
+            )
+            sample_rate, pcm = audio_result
+            stem = f"{line_number:04d}_{sanitize_filename_text(body)}"
+            candidate = f"{stem}.wav"
+            duplicate = 2
+            while candidate.casefold() in used_names:
+                candidate = f"{stem}_{duplicate}.wav"
+                duplicate += 1
+            used_names.add(candidate.casefold())
+            output_path = batch_dir / candidate
+            sf.write(output_path, np.asarray(pcm, dtype=np.int16), sample_rate, subtype="PCM_16")
+            generated.append(output_path)
+            details.append(f"[{position}/{len(rows)}] {candidate}")
     finally:
         if voice_id:
             runtime.delete_voice(voice_id)
