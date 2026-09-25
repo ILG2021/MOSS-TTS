@@ -283,7 +283,10 @@ def run_inference(
             current_reference = str(temporary / f"reference-{index}.wav")
             sf.write(current_reference, _stereo_tail(audio, sample_rate), sample_rate, subtype="PCM_16")
 
-    concatenated = np.concatenate(results, axis=0)
+    concatenated_stereo = np.concatenate(results, axis=0)
+    # Keep the native stereo codec path for generation and rolling references,
+    # but expose mono files/audio to the frontend.
+    concatenated = concatenated_stereo.mean(axis=1, dtype=np.float32)
     output_path = None
     if save_output:
         output_path = runtime.output_dir / (
@@ -292,7 +295,7 @@ def run_inference(
         sf.write(output_path, concatenated, output_rate, subtype="PCM_16")
     total_elapsed = time.monotonic() - started
     status = (
-        f"完成 | {len(results)}段 | 48kHz双声道 | 总耗时={total_elapsed:.2f}s\n"
+        f"完成 | {len(results)}段 | 48kHz单声道 | 总耗时={total_elapsed:.2f}s\n"
         f"输出文件：{output_path or '由调用方保存'}\n"
         + "\n".join(details)
     )

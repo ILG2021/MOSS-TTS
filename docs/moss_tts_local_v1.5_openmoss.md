@@ -4,8 +4,9 @@
 native C++ `moss_tts_local` pipeline. It is separate from
 `clis/moss_tts_openmoss_app.py`, which remains the delay-pattern application.
 
-The local-pattern application preserves the model's 48 kHz stereo output and
-uses openmoss's `ref_text` continuation protocol. Plain voice cloning sends a
+The Local model and codec run natively at 48 kHz stereo. The application keeps
+that stereo path internally for inference and rolling references, then downmixes
+the final frontend/download output to 48 kHz mono. Plain voice cloning sends a
 reference without `ref_text`; continuation transcribes the reference and sends
 the transcript and audio together.
 
@@ -60,7 +61,7 @@ one-based sequence number. For example:
 第二句没有显式编号。
 ```
 
-Each line produces one 48 kHz stereo WAV, even when that line is internally
+Each line produces one 48 kHz mono WAV, even when that line is internally
 split at punctuation because it exceeds the character limit. Output names use
 `NNNN_sanitized-text.wav`; the text portion is limited to 100 characters.
 Duplicate names receive a numeric suffix. After all lines finish, the app
