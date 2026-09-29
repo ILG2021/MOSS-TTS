@@ -49,7 +49,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--input-jsonl", type=str, required=True)
     parser.add_argument("--output-jsonl", type=str, required=True)
-    parser.add_argument("--batch-size", type=int, default=16)
+    parser.add_argument("--batch-size", type=int, default=1)
     parser.add_argument("--n-vq", type=int, default=None)
     parser.add_argument(
         "--num-shards",
