@@ -45,6 +45,8 @@ def read_clips(args):
                 if not path.is_absolute():
                     path = root / path
                 path = path.resolve()
+                if not path.exists():
+                    continue
                 if path in seen:
                     raise ValueError(f"Duplicate input: {path}")
                 seen.add(path)
