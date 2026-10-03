@@ -57,7 +57,8 @@ class MergeTests(unittest.TestCase):
             manifest = root / "metadata.txt"
             manifest.write_text("clip001|a\nclip002|b\nclip004|c\n", encoding="utf-8")
             output = root / "out"
-            args = ["--input", str(manifest), "--output-dir", str(output)]
+            args = ["--input", str(manifest), "--output-dir", str(output),
+                    "--min-seconds", "30"]
             log = io.StringIO()
             with contextlib.redirect_stdout(log):
                 merge.main(args)
@@ -71,6 +72,21 @@ class MergeTests(unittest.TestCase):
                             "--min-seconds", "40"])
             self.assertFalse(empty_output.exists())
             self.assertIn("nothing written", log.getvalue())
+
+    def test_default_target_maximum_and_short_tail(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "wavs").mkdir()
+            for number, seconds in enumerate((55, 20, 55, 40, 20, 5), 1):
+                sf.write(root / "wavs" / f"clip{number:03d}.wav",
+                         np.zeros(seconds * 8000), 8000)
+            manifest = root / "metadata.txt"
+            manifest.write_text("".join(f"clip{n:03d}|{n}\n" for n in range(1, 7)), encoding="utf-8")
+            output = root / "out"
+            merge.main(["--input", str(manifest), "--output-dir", str(output)])
+            rows = [json.loads(line) for line in (output / "train_raw.jsonl").read_text(encoding="utf-8").splitlines()]
+            self.assertEqual([row["text"] for row in rows], ["12", "3", "45", "6"])
+            self.assertEqual([sf.info(row["audio"]).duration for row in rows], [75, 55, 60, 5])
 
     def test_duration_format_and_number_boundaries(self):
         def clip(n, frames=20, rate=10, group=("a",)):
