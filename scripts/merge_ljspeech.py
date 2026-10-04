@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import random
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -69,8 +70,46 @@ def read_clips(args):
     return clips
 
 
+def parse_target_dist(spec, maximum):
+    """Parse 'lo-hi:weight,...' into [(lo, hi, weight)]; weights need not sum to 1."""
+    buckets = []
+    for item in spec.split(","):
+        item = item.strip()
+        if not item:
+            continue
+        match = re.fullmatch(r"([\d.]+)\s*-\s*([\d.]+)\s*:\s*([\d.]+)", item)
+        if not match:
+            raise ValueError(f"Bad --target-dist item {item!r}; expected lo-hi:weight, e.g. 60-90:0.4")
+        low, high, weight = map(float, match.groups())
+        if not 0 < low < high <= maximum:
+            raise ValueError(f"--target-dist bucket {item!r} must satisfy 0 < lo < hi <= max-seconds")
+        if weight <= 0:
+            raise ValueError(f"--target-dist weight must be positive: {item!r}")
+        buckets.append((low, high, weight))
+    if not buckets:
+        raise ValueError("--target-dist is empty")
+    return buckets
+
+
+def target_sampler(buckets, seed):
+    """Pick a bucket by weight, then a uniform target inside it."""
+    rng = random.Random(seed)
+    weights = [w for _, _, w in buckets]
+
+    def sample():
+        low, high, _ = rng.choices(buckets, weights=weights)[0]
+        return rng.uniform(low, high)
+    return sample
+
+
 def plan_groups(clips, target, maximum, max_clips):
-    """Never cross filename groups, numbering gaps, or audio formats."""
+    """Never cross filename groups, numbering gaps, or audio formats.
+
+    `target` is a fixed number of seconds, or a zero-argument callable that is
+    asked for a fresh target each time a new group starts.
+    """
+    next_target = target if callable(target) else (lambda: target)
+    current_target = next_target()
     pending = []
     seconds = 0.0
     for clip in clips:
@@ -86,11 +125,13 @@ def plan_groups(clips, target, maximum, max_clips):
                     or (max_clips and len(pending) >= max_clips)):
                 yield pending
                 pending, seconds = [], 0.0
+                current_target = next_target()
         pending.append(clip)
         seconds += duration
-        if seconds >= target:
+        if seconds >= current_target:
             yield pending
             pending, seconds = [], 0.0
+            current_target = next_target()
     if pending:
         yield pending
 
@@ -114,8 +155,12 @@ def main(argv=None):
     parser.add_argument("--input", nargs="+", required=True, help="UTF-8 path|text manifests")
     parser.add_argument("--audio-root", help="Relative-path root; default: manifest directory/wavs")
     parser.add_argument("--output-dir", required=True, help="Must not already exist")
-    parser.add_argument("--target-seconds", type=float, default=60,
+    parser.add_argument("--target-seconds", type=float, default=None,
                         help="Finish a group once it reaches this duration; default: 60")
+    parser.add_argument("--target-dist", default=None,
+                        help="Random per-group target, weighted buckets 'lo-hi:weight,...', "
+                             "e.g. '5-15:0.15,15-30:0.15,30-60:0.3,60-90:0.4'; replaces --target-seconds")
+    parser.add_argument("--seed", type=int, default=42, help="Random seed for --target-dist; default: 42")
     parser.add_argument("--min-seconds", type=float, default=0,
                         help="Discard output groups shorter than this; default: 0 (keep tails and short groups)")
     parser.add_argument("--max-seconds", type=float, default=90,
@@ -128,8 +173,23 @@ def main(argv=None):
     parser.add_argument("--limit", type=int, default=0, help="Write only first N output groups; 0: all")
     parser.add_argument("--dry-run", action="store_true", help="Inspect and plan without writing")
     args = parser.parse_args(argv)
-    if not 0 < args.target_seconds <= args.max_seconds < float("inf"):
-        parser.error("Require 0 < target-seconds <= max-seconds < infinity")
+    if args.target_dist is not None and args.target_seconds is not None:
+        parser.error("Use either --target-seconds or --target-dist, not both")
+    if not 0 < args.max_seconds < float("inf"):
+        parser.error("Require 0 < max-seconds < infinity")
+    buckets = None
+    if args.target_dist is not None:
+        try:
+            buckets = parse_target_dist(args.target_dist, args.max_seconds)
+        except ValueError as exc:
+            parser.error(str(exc))
+        target = target_sampler(buckets, args.seed)
+    else:
+        if args.target_seconds is None:
+            args.target_seconds = 60.0
+        if not 0 < args.target_seconds <= args.max_seconds:
+            parser.error("Require 0 < target-seconds <= max-seconds < infinity")
+        target = args.target_seconds
     if args.max_clips < 0 or args.limit < 0 or args.text_column < 1:
         parser.error("max-clips/limit must be nonnegative; text-column must be >= 1")
     if not 0 <= args.min_seconds < float("inf"):
@@ -141,7 +201,7 @@ def main(argv=None):
     if not clips:
         parser.error("No input records")
     groups = []
-    for group in plan_groups(clips, args.target_seconds, args.max_seconds, args.max_clips):
+    for group in plan_groups(clips, target, args.max_seconds, args.max_clips):
         duration = sum(c.frames / c.rate for c in group)
         if duration < args.min_seconds:
             print(f"Skipped short group: {group[0].path} -> {group[-1].path.name} "
@@ -167,6 +227,21 @@ def main(argv=None):
     print(f"Selected {sum(map(len, groups))}/{len(clips)} clips -> {len(groups)} outputs; "
           f"duration min/mean/max: {min(durations):.2f}/{sum(durations)/len(durations):.2f}/{max(durations):.2f}s; "
           f"singletons: {sum(len(g) == 1 for g in groups)}")
+    if buckets:
+        # Realised distribution can differ from the weights: groups are cut early by
+        # numbering gaps or --max-seconds, and short source clips limit the low end.
+        total = sum(durations)
+        print(f"Target distribution (seed={args.seed}) vs realised output:")
+        edges = sorted({0.0, *(b for low, high, _ in buckets for b in (low, high)), float("inf")})
+        weight_sum = sum(w for _, _, w in buckets)
+        for low, high in zip(edges, edges[1:]):
+            selected = [d for d in durations if low <= d < high]
+            if not selected and not any(l == low and h == high for l, h, _ in buckets):
+                continue
+            weight = sum(w for l, h, w in buckets if l == low and h == high) / weight_sum
+            label = f"{low:g}-{high:g}s" if high != float("inf") else f"{low:g}s+"
+            print(f"  {label:>9}: weight {weight:6.1%} | {len(selected):>5} groups "
+                  f"{len(selected) / len(durations):6.1%} | {sum(selected) / total:6.1%} of duration")
     if args.dry_run:
         for group, relative in list(zip(groups, relatives))[:10]:
             print(f"{group[0].path.name} -> {group[-1].path.name} ({len(group)} clips) => {relative}")
