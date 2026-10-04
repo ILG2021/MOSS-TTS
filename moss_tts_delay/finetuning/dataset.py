@@ -19,7 +19,17 @@ from torch.utils.data import Dataset
 from moss_tts_delay.finetuning.common import normalize_audio_path_list
 
 
-USER_MESSAGE_KEYS = ("text", "instruction", "tokens", "quality", "sound_event", "ambient_sound", "language")
+USER_MESSAGE_KEYS = ("text", "instruction", "tokens", "quality", "sound_event", "ambient_sound", "language", "scene")
+
+
+def apply_speaker_tag(text: Optional[str], template: str, speaker_tag: str) -> Optional[str]:
+    """TTSD expects dialogue text such as ``[S1]...[S2]...``. For single-speaker data,
+    prepend ``[S1]`` when no speaker tag is present (ttsd template + speaker_tag=auto)."""
+    if text is None or template != "ttsd" or speaker_tag != "auto":
+        return text
+    if text.lstrip().startswith("[S"):
+        return text
+    return "[S1]" + text.lstrip()
 
 
 def normalize_audio_codes(value: Any, field_name: str) -> torch.Tensor:
@@ -62,10 +72,13 @@ class MossTTSSFTDataset(Dataset):
         records: Iterable[Dict[str, Any]],
         processor,
         n_vq: Optional[int] = None,
+        speaker_tag: str = "auto",
     ) -> None:
         self.records = list(records)
         self.processor = processor
         self.n_vq = n_vq
+        self.prompt_template = getattr(processor, "prompt_template", "moss_tts")
+        self.speaker_tag = speaker_tag
         self._audio_cache: Dict[str, torch.Tensor] = {}
 
     def __len__(self) -> int:
@@ -139,6 +152,9 @@ class MossTTSSFTDataset(Dataset):
         for key in USER_MESSAGE_KEYS:
             if record.get(key) is not None:
                 user_kwargs[key] = record[key]
+        if "text" in user_kwargs:
+            user_kwargs["text"] = apply_speaker_tag(user_kwargs["text"], self.prompt_template, self.speaker_tag)
+        user_kwargs["template"] = self.prompt_template
 
         user_message = self.processor.build_user_message(**user_kwargs)
         prompt = self.processor([[user_message]], mode="generation", n_vq=target_n_vq)

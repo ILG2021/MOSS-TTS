@@ -172,6 +172,9 @@ def main() -> None:
         codec_path=args.codec_path,
     )
     processor.audio_tokenizer = processor.audio_tokenizer.to(device)
+    if args.n_vq is None:
+        args.n_vq = int(getattr(processor.model_config, "n_vq", 32))
+        print(f"[prepare_data] --n-vq not set; using model n_vq={args.n_vq}")
 
     target_audio_paths = []
     for index, record in enumerate(records):

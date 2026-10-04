@@ -40,7 +40,7 @@ if str(REPO_ROOT) not in sys.path:
 from moss_tts_delay.finetuning.common import load_jsonl, normalize_audio_path_list, resolve_jsonl_paths
 from moss_tts_delay.finetuning.dataset import MossTTSSFTDataset
 from moss_tts_delay.modeling_moss_tts import MossTTSDelayModel
-from moss_tts_delay.processing_moss_tts import MossTTSDelayProcessor
+from moss_tts_delay.processing_moss_tts import MossTTSDelayProcessor, resolve_prompt_template
 
 
 SCHEDULER_CHOICES = (
@@ -196,6 +196,24 @@ def parse_args(argv=None) -> argparse.Namespace:
     parser.add_argument("--attn-implementation", type=str, default="auto")
     parser.add_argument("--audio-tokenizer-device", type=str, default=None)
     parser.add_argument("--n-vq", type=int, default=None)
+    parser.add_argument(
+        "--prompt-template",
+        type=str,
+        default="auto",
+        choices=["auto", "moss_tts", "ttsd"],
+        help=(
+            "user_inst prompt layout. auto: model n_vq==16 (MOSS-TTSD) -> ttsd, otherwise moss_tts. "
+            "ttsd mirrors MOSS-TTSD-v1.0's processor (Scene section, no text normalization, "
+            "audio codes truncated to the model n_vq)."
+        ),
+    )
+    parser.add_argument(
+        "--speaker-tag",
+        type=str,
+        default="auto",
+        choices=["auto", "off"],
+        help="ttsd only: auto prepends [S1] to text that has no [Sx] speaker tag (single-speaker data).",
+    )
     parser.add_argument("--gradient-checkpointing", action="store_true")
     parser.add_argument(
         "--channelwise-loss-weight",
@@ -334,6 +352,7 @@ def build_processor(
     need_audio_tokenizer: bool,
     audio_tokenizer_device: Optional[str],
     default_audio_tokenizer_device: str,
+    prompt_template: str = "auto",
 ):
     config = AutoConfig.from_pretrained(model_path, trust_remote_code=True)
     tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
@@ -341,12 +360,14 @@ def build_processor(
         tokenizer=tokenizer,
         audio_tokenizer=None,
         model_config=config,
+        prompt_template=prompt_template,
     )
 
     if need_audio_tokenizer:
         processor = MossTTSDelayProcessor.from_pretrained(
             model_path,
             codec_path=codec_path,
+            prompt_template=prompt_template,
         )
         device = audio_tokenizer_device or default_audio_tokenizer_device
         processor.audio_tokenizer = processor.audio_tokenizer.to(device)
@@ -413,7 +434,12 @@ def resolve_inference_asset(model_path: str, filename: str) -> Optional[Path]:
     return Path(resolved)
 
 
-def copy_inference_assets(model_path: str, codec_path: str, output_dir: Path) -> None:
+def copy_inference_assets(
+    model_path: str,
+    codec_path: str,
+    output_dir: Path,
+    prompt_template: Optional[str] = None,
+) -> None:
     for filename in INFERENCE_ASSET_FILES:
         src = resolve_inference_asset(model_path, filename)
         if src is not None and src.exists():
@@ -421,6 +447,8 @@ def copy_inference_assets(model_path: str, codec_path: str, output_dir: Path) ->
 
     processor_config = dict(BASE_PROCESSOR_CONFIG)
     processor_config["audio_tokenizer_name_or_path"] = codec_path
+    if prompt_template:
+        processor_config["prompt_template"] = prompt_template
     with open(output_dir / "processor_config.json", "w", encoding="utf-8") as f:
         json.dump(processor_config, f, indent=2, ensure_ascii=False)
 
@@ -511,7 +539,10 @@ def save_checkpoint(
             save_embedding_layers=False,
         )
         copy_support_files(output_dir)
-        copy_inference_assets(model_path, codec_path, output_dir)
+        copy_inference_assets(
+            model_path, codec_path, output_dir,
+            prompt_template=train_args.get("resolved_prompt_template"),
+        )
         with open(output_dir / "finetune_args.json", "w", encoding="utf-8") as f:
             json.dump(train_args, f, indent=2, ensure_ascii=False)
     accelerator.wait_for_everyone()
@@ -593,6 +624,20 @@ def main(argv=None) -> None:
         f"train_files={len(train_paths)} train_records={len(records)}"
     )
 
+    model_config_for_template = AutoConfig.from_pretrained(args.model_path, trust_remote_code=True)
+    model_n_vq = int(getattr(model_config_for_template, "n_vq", 32))
+    resolved_prompt_template = resolve_prompt_template(args.prompt_template, model_n_vq)
+    accelerator.print(
+        f"[{format_timestamp()}] [sft] model n_vq={model_n_vq} "
+        f"prompt_template={args.prompt_template} -> {resolved_prompt_template} "
+        f"speaker_tag={args.speaker_tag if resolved_prompt_template == 'ttsd' else 'n/a'}"
+    )
+    if resolved_prompt_template == "moss_tts" and model_n_vq == 16:
+        accelerator.print(
+            f"[{format_timestamp()}] [sft] WARNING: n_vq=16 model (MOSS-TTSD?) trained with the "
+            "moss_tts prompt layout; inference must then use the same layout."
+        )
+
     need_audio_tokenizer = processor_needs_audio_tokenizer(records)
     if need_audio_tokenizer:
         accelerator.print(
@@ -606,12 +651,14 @@ def main(argv=None) -> None:
             need_audio_tokenizer=need_audio_tokenizer,
             audio_tokenizer_device=args.audio_tokenizer_device,
             default_audio_tokenizer_device=str(accelerator.device),
+            prompt_template=resolved_prompt_template,
         )
 
     dataset = MossTTSSFTDataset(
         records=records,
         processor=processor,
         n_vq=args.n_vq,
+        speaker_tag=args.speaker_tag,
     )
 
     model_dtype = resolve_torch_dtype(args.mixed_precision)
@@ -689,6 +736,8 @@ def main(argv=None) -> None:
     train_args_to_save["resolved_warmup_steps"] = warmup_steps
     train_args_to_save["resolved_channelwise_loss_weight"] = resolved_channelwise_loss_weight
     train_args_to_save["dataset_fingerprint"] = fingerprint
+    train_args_to_save["resolved_prompt_template"] = resolved_prompt_template
+    train_args_to_save["model_n_vq"] = model_n_vq
 
     with tensorboard_logger(args, accelerator, output_root, train_args_to_save, resume_progress) as writer:
         if resume_progress:

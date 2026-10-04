@@ -26,7 +26,7 @@ Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 
 ### 数据准备与 LJSpeech 连续短音频合并
 
-数据格式与预处理方式见 [原微调文档](README_zh.md)。如果原始数据是连续编号的 LJSpeech 短音频，可使用 `scripts\merge_ljspeech.py` 按目标 60 秒、上限 90 秒合并，并保留短尾段。此设置是微调数据准备的起步配置，不是官方最佳长度；合并脚本的完整说明见 [连续短音频合并文档](../../scripts/merge_ljspeech.md)。
+数据格式与预处理方式见 [原微调文档](README_zh.md)。如果原始数据是连续编号的 LJSpeech 短音频，可使用 `scripts\merge_ljspeech.py` 合并。推荐用 `--target-dist` 按多个时长区间随机混合合并（上限 90 秒），并保留短尾段。这是微调数据准备的起步配置，不是官方最佳长度；合并脚本的详细参数与用法见下文说明。
 
 依赖：`pip install numpy soundfile`。合并过程在 CPU 上进行，不需要 GPU 或模型。
 
@@ -44,7 +44,16 @@ Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 
 #### 2. 合并操作与命令示例
 
-选择一个尚不存在的输出目录，执行全量合并：
+选择一个尚不存在的输出目录，执行全量合并。推荐按多个时长区间随机混合（规则见第 4 节）：
+
+```powershell
+python scripts\merge_ljspeech.py `
+  --input "D:\dataset\metadata.txt" `
+  --output-dir "D:\dataset\merged_mix" `
+  --max-seconds 90 --target-dist "5-15:0.15,15-30:0.15,30-60:0.30,60-90:0.40" --seed 42
+```
+
+备选：固定目标时长。所有样本都集中在 60 秒左右，缺少短段，推理时用短分段容易与训练分布不匹配，一般不推荐：
 
 ```powershell
 python scripts\merge_ljspeech.py `
@@ -62,20 +71,13 @@ python scripts\merge_ljspeech.py `
 
 #### 4. 时长控制与过滤机制
 
-脚本默认目标时长为 60 秒，最大时长为 90 秒，最小时长为 0 秒（上述命令显式写出默认值，也可以省略这三个参数）：
+不传 `--target-dist` 时，脚本默认目标时长为 60 秒，最大时长为 90 秒，最小时长为 0 秒（第 2 节的备选命令显式写出了这些默认值）：
 
 - `--target-seconds 60`：累计达到设定秒数就结束当前组，不保证恰好相等，也不会截断原始切片。例如已有 55 秒，加入下一条 20 秒后输出 75 秒。
 - `--max-seconds 90`：每组的时长上限。若已有 55 秒，下一条为 40 秒，合计超过 90 秒，则先输出当前 55 秒组，40 秒切片进入下一组。单条原始音频已超过上限时会报错。
 - `--min-seconds 0`：默认保留所有短组，包括孤立单条和未达到目标的尾段（尾段是连续分组最后剩余的切片，不是音频末尾的静音）。若仍需沿用短组过滤，可设置 `--min-seconds 15`：不足 15 秒丢弃，恰好 15 秒保留，逐组打印被过滤的来源、条数和时长。
 
-**随机目标时长（多长度混合）**：用 `--target-dist` 代替固定的 `--target-seconds`，每开始一个新组时，先按权重抽一个区间，再在区间内均匀抽目标时长。这样一次合并就能得到长短混合的数据，每条音频只出现一次：
-
-```powershell
-python scripts\merge_ljspeech.py `
-  --input "D:\dataset\metadata.txt" `
-  --output-dir "D:\dataset\merged_mix" `
-  --max-seconds 90 --target-dist "5-15:0.15,15-30:0.15,30-60:0.30,60-90:0.40" --seed 42
-```
+**随机目标时长（多长度混合，推荐）**：`--target-dist` 代替固定的 `--target-seconds`。每开始一个新组时，先按权重抽一个区间，再在区间内均匀抽目标时长。这样一次合并就能得到长短混合的数据，每条音频只出现一次（命令见第 2 节）：
 
 - 格式为 `下限-上限:权重`，用逗号分隔；权重不必加起来等于 1，各区间上限不能超过 `--max-seconds`。不能和 `--target-seconds` 同时使用。
 - 权重控制的是**组数**比例；长组更长，所以按时长算长段占比更高。运行后会打印每个区间的目标权重、实际组数占比和时长占比。
@@ -106,7 +108,7 @@ python scripts\merge_ljspeech.py `
 python moss_tts_delay\finetuning\prepare_data.py `
   --model-path OpenMOSS-Team/MOSS-TTS-v1.5 `
   --codec-path OpenMOSS-Team/MOSS-Audio-Tokenizer `
-  --input-jsonl D:\dataset\merged_60s\train_raw.jsonl --output-jsonl train_with_codes.jsonl `
+  --input-jsonl D:\dataset\merged_mix\train_raw.jsonl --output-jsonl train_with_codes.jsonl `
   --device auto
 ```
 
@@ -134,7 +136,7 @@ python -m accelerate.commands.launch --num_processes 1 moss_tts_delay\finetuning
 
 先使用上述 batch size 1、BF16、梯度检查点和 SDPA 配置，并在命令末尾增加
 `--max-train-steps 10` 验证训练和保存，正式训练时删除该参数。
-建议先使用目标 60 秒、上限 90 秒合并的数据试跑，同时保留短句和尾段。目标音频和参考音频（如有）均提前编码；参考音频长度需单独设置，合并参数只控制目标音频。
+建议先使用第 2 节随机混合时长（上限 90 秒）合并的数据试跑，同时保留短句和尾段。目标音频和参考音频（如有）均提前编码；参考音频长度需单独设置，合并参数只控制目标音频。
 当前脚本不会自动截断超长样本；如显存不足，优先缩短单条音频和参考音频长度。
 梯度累积不会减少单条样本的显存占用。
 
@@ -210,6 +212,48 @@ python moss_tts_delay\finetuning\merge_lora.py `
 
 合并在 CPU 上执行，默认 float32；可用 `--dtype bfloat16` 降低内存占用。
 输出目录必须为空或不存在，基础模型必须与训练时一致。
+
+## MOSS-TTSD 基座的 LoRA
+
+TTSD-v1.0 与 v1.5 同为 `moss_tts_delay` 架构，代码沿用同一套，不需要替换 `.py` 文件。区别有三点：
+- RVQ 为 16 路；
+- prompt 多一个 `- Scene:` 字段，且 `Tokens` 固定为 None；
+- 文本不做规范化，用 `[S1]`/`[S2]` 标注说话人。
+
+`processing_moss_tts.py` 新增 `prompt_template`（`auto` / `moss_tts` / `ttsd`）。`auto` 在模型 n_vq=16 时选 `ttsd`，否则选 `moss_tts`，所以 v1.5 的行为不变。`ttsd` 分支逐项对齐官方 TTSD 的 `processing_moss_tts.py`。
+
+1. 预编码：不指定 `--n-vq` 时按模型 n_vq 编码（TTSD 为 16 路）。已有的 32 路编码数据也能直接用，训练时会自动截取前 16 路，只是文件更大。
+
+   ```powershell
+   python moss_tts_delay\finetuning\prepare_data.py `
+     --model-path OpenMOSS-Team/MOSS-TTSD-v1.0 `
+     --codec-path OpenMOSS-Team/MOSS-Audio-Tokenizer `
+     --input-jsonl D:\dataset\merged_mix\train_raw.jsonl --output-jsonl train_ttsd_codes.jsonl `
+     --device auto
+   ```
+
+2. 训练：只需换 `--model-path`，模板会自动解析为 `ttsd`，也可以显式写 `--prompt-template ttsd`。单说话人数据的文本不必改：`--speaker-tag auto`（默认）会给没有 `[Sx]` 标签的文本自动加 `[S1]` 前缀。启动日志会打印 `prompt_template=auto -> ttsd`。
+
+   ```powershell
+   python -m accelerate.commands.launch --num_processes 1 moss_tts_delay\finetuning\sft_lora.py `
+     --model-path OpenMOSS-Team/MOSS-TTSD-v1.0 `
+     --train-jsonl train_ttsd_codes.jsonl `
+     --output-dir output\ttsd_lora `
+     --per-device-batch-size 1 --gradient-accumulation-steps 8 `
+     --learning-rate 1e-4 --num-epochs 10 --mixed-precision bf16 `
+     --gradient-checkpointing --attn-implementation sdpa `
+     --lora-r 16 --lora-alpha 32 --lora-dropout 0.05
+   ```
+
+   - `--channelwise-loss-weight` 默认是 `1,32`：音频总权重 32 平均分到 16 个头，每个头为 2。如果想与 v1.5 保持相同的每头权重，可以改成 `1,16`。
+   - 实际使用的模板记录在 `finetune_args.json`（`resolved_prompt_template`）和每个 checkpoint 的 `processor_config.json` 里。完整续训时会自动恢复。
+
+3. 合并：用法同上，`--model-path` 必须是 TTSD。`merge_lora.py` 会把 adapter 的 `prompt_template` 写入合并后模型的 `processor_config.json`。
+
+4. 推理：GGUF 部署见 [openmoss 文档第 13 节](../openmoss/README_zh.md)，务必加 `--template ttsd`。推理文本同样需要 `[S1]` 前缀，Gradio 在 `--template ttsd` 下会自动补上。
+
+> [!NOTE]
+> 以上改动尚未在 GPU 上实测。建议先运行 `python scripts\check_ttsd_prompt.py`，确认 v1.5 未回归、TTSD prompt 与官方 processor 逐 token 一致；再加 `--max-train-steps 10` 试跑。
 
 ## TensorBoard 训练日志
 

@@ -42,6 +42,20 @@ CONTINUATION_NOTICE = (
     "参考文本由 faster-whisper large-v3-turbo 自动转录并拼接；只需输入待生成文本。"
 )
 
+# Audio sampling UI defaults per prompt template: (temperature, top_p, top_k, repetition_penalty).
+# ttsd follows MOSS-TTSD-v1.0 generation_config.json.
+SAMPLING_DEFAULTS = {
+    "moss_tts": (1.7, 0.8, 25, 1.0),
+    "ttsd": (1.1, 0.9, 50, 1.1),
+}
+
+
+def apply_speaker_tag(text: str, template: str) -> str:
+    """MOSS-TTSD expects ``[S1]...`` dialogue text; mirror sft_lora's --speaker-tag auto."""
+    if template != "ttsd" or text.lstrip().startswith("[S"):
+        return text
+    return "[S1]" + text.lstrip()
+
 MODE_CLONE = "克隆"
 MODE_CONTINUE = "续写"
 MODE_CONTINUE_CLONE = "续写 + 克隆"
@@ -252,6 +266,12 @@ class OpenMossRuntime:
                 f"{self.base_url} 的 codec_cpu={info.get('codec_cpu')!r}，"
                 f"但当前 Gradio 请求 codec_cpu={self.args.codec_cpu!r}"
             )
+        served_template = info.get("prompt_template")
+        if served_template is not None and served_template != self.args.template:
+            raise RuntimeError(
+                f"{self.base_url} 的 prompt_template={served_template!r}（n_vq={info.get('n_vq')}），"
+                f"但当前 Gradio 使用 --template {self.args.template}；请换端口或重启对应模型的 server"
+            )
         if self.adapters:
             advertised = info.get("lora_adapters")
             if not isinstance(advertised, list):
@@ -309,6 +329,9 @@ class OpenMossRuntime:
                 command.append("--codec-cpu")
             if self.args.no_flash_attn:
                 command.append("--no-flash-attn")
+            if self.args.template == "ttsd":
+                # openmoss' own auto treats every n_vq=16 GGUF as MOSS-VoiceGenerator.
+                command.extend(["--template", "ttsd"])
 
             env = os.environ.copy()
             dll_dirs = [
@@ -358,7 +381,7 @@ class OpenMossRuntime:
     ) -> tuple[int, np.ndarray, float]:
         self.ensure_started()
         payload = {
-            "text": text,
+            "text": apply_speaker_tag(text, self.args.template),
             "response_format": "wav",
             "max_new_tokens": int(max_new_tokens),
             "sampling": {
@@ -648,32 +671,33 @@ def build_demo(runtime: OpenMossRuntime, args: argparse.Namespace) -> gr.Blocks:
                 duration_hint = gr.Markdown("时长控制已关闭。")
 
                 with gr.Accordion("采样参数（音频）", open=True):
+                    default_temp, default_top_p, default_top_k, default_rep = SAMPLING_DEFAULTS[args.template]
                     temperature = gr.Slider(
                         minimum=0.1,
                         maximum=3.0,
                         step=0.05,
-                        value=1.7,
+                        value=default_temp,
                         label="采样温度 (audio_temperature)",
                     )
                     top_p = gr.Slider(
                         minimum=0.1,
                         maximum=1.0,
                         step=0.01,
-                        value=0.8,
+                        value=default_top_p,
                         label="Top-P 截断 (audio_top_p)",
                     )
                     top_k = gr.Slider(
                         minimum=1,
                         maximum=200,
                         step=1,
-                        value=25,
+                        value=default_top_k,
                         label="Top-K 截断 (audio_top_k)",
                     )
                     repetition_penalty = gr.Slider(
                         minimum=0.8,
                         maximum=2.0,
                         step=0.05,
-                        value=1.0,
+                        value=default_rep,
                         label="重复惩罚 (audio_repetition_penalty)",
                     )
                     max_new_tokens = gr.Slider(
@@ -813,6 +837,15 @@ def main() -> None:
         help="在 CPU 运行 AudioTokenizer codec；embeddings/LM heads 仍驻留 GPU",
     )
     parser.add_argument("--no-flash-attn", action="store_true")
+    parser.add_argument(
+        "--template",
+        choices=["moss_tts", "ttsd"],
+        default="moss_tts",
+        help=(
+            "moss_tts: MOSS-TTS v1.x GGUF (default). ttsd: MOSS-TTSD GGUF — passes "
+            "--template ttsd to the server, prefixes text with [S1] and uses TTSD sampling defaults."
+        ),
+    )
     parser.add_argument("--load-timeout", type=float, default=300)
     parser.add_argument("--request-timeout", type=float, default=1800)
     parser.add_argument("--output-dir", default="outputs/openmoss")

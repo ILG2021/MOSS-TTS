@@ -109,6 +109,24 @@ def _resolve_pretrained_model_ref(pretrained_model_name_or_path):
 
 AUDIO_PLACEHOLDER = "<|audio|>"
 
+# Prompt templates:
+#   "moss_tts": MOSS-TTS v1.0/v1.5 (n_vq=32) user_inst layout (default behaviour, unchanged).
+#   "ttsd":     MOSS-TTSD-v1.0 (n_vq=16) layout, mirrors the official TTSD processing_moss_tts.py:
+#               adds "- Scene:" section, hard-codes "- Tokens:\nNone", renders `[Sx]: None`
+#               for missing references and does NOT run normalize_tts_text on text.
+#   "auto":     resolved from model_config.n_vq (16 -> ttsd, otherwise moss_tts).
+PROMPT_TEMPLATES = ("moss_tts", "ttsd")
+
+
+def resolve_prompt_template(template: Optional[str], n_vq: Optional[int] = None) -> str:
+    if template is None or template == "auto":
+        return "ttsd" if n_vq is not None and int(n_vq) == 16 else "moss_tts"
+    if template not in PROMPT_TEMPLATES:
+        raise ValueError(
+            f"Unknown prompt_template {template!r}; expected one of {PROMPT_TEMPLATES + ('auto',)}"
+        )
+    return template
+
 
 @dataclass
 class Message:
@@ -126,8 +144,13 @@ class UserMessage(Message):
     sound_event: Optional[str] = None
     ambient_sound: Optional[str] = None
     language: Optional[str] = None
+    scene: Optional[str] = None
+    template: str = "moss_tts"
 
     def __post_init__(self):
+        if self.template == "ttsd":
+            self._post_init_ttsd()
+            return
         template = """<user_inst>
 - Reference(s):
 {reference}
@@ -178,6 +201,58 @@ class UserMessage(Message):
         self._content = content
         self._audio_codes_list = audio_codes_list
 
+    def _post_init_ttsd(self):
+        # Mirrors OpenMOSS-Team/MOSS-TTSD-v1.0 processing_moss_tts.py UserMessage.
+        template = """<user_inst>
+- Reference(s):
+{reference}
+- Instruction:
+{instruction}
+- Tokens:
+None
+- Quality:
+{quality}
+- Sound Event:
+{sound_event}
+- Ambient Sound:
+{ambient_sound}
+- Language:
+{language}
+- Scene:
+{scene}
+- Text:
+{text}
+</user_inst>"""
+
+        audio_codes_list = []
+        if self.reference is None:
+            reference = "None"
+        elif isinstance(self.reference, List):
+            reference = []
+            for speaker_idx, speaker_reference in enumerate(self.reference):
+                if speaker_reference is None:
+                    reference.append(f"[S{speaker_idx + 1}]: None")
+                else:
+                    reference.append(f"[S{speaker_idx + 1}]:\n{AUDIO_PLACEHOLDER}")
+                    audio_codes_list.append(speaker_reference)
+            reference = "\n".join(reference)
+        else:
+            raise TypeError("`reference` should be exactly a list when it is not None.")
+
+        content = (
+            template.replace("{reference}", str(reference))
+            .replace("{instruction}", str(self.instruction))
+            .replace("{quality}", str(self.quality))
+            .replace("{sound_event}", str(self.sound_event))
+            .replace("{ambient_sound}", str(self.ambient_sound))
+            .replace("{language}", str(self.language))
+            .replace("{scene}", "None")  # official TTSD always renders None
+            .replace("{text}", str(self.text))
+        )
+
+        self._content = content
+        self._audio_codes_list = audio_codes_list
+
     def to_dict(self):
         return {
             "role": "user",
@@ -208,6 +283,7 @@ USER_MESSAGE_FIELDS = (
     "sound_event",
     "ambient_sound",
     "language",
+    "scene",
 )
 
 
@@ -223,6 +299,7 @@ class MossTTSDelayProcessor(ProcessorMixin):
         tokenizer: PreTrainedTokenizerBase,
         audio_tokenizer: Any = None,
         model_config: Optional[MossTTSDelayConfig] = None,
+        prompt_template: Optional[str] = "auto",
         **kwargs,
     ):
         super().__init__(tokenizer=tokenizer, audio_tokenizer=audio_tokenizer, **kwargs)
@@ -233,6 +310,9 @@ class MossTTSDelayProcessor(ProcessorMixin):
         if model_config is None:
             model_config = MossTTSDelayConfig()
         self.model_config = model_config
+        self.prompt_template = resolve_prompt_template(
+            prompt_template, getattr(self.model_config, "n_vq", None)
+        )
 
         self.imstart_token_id = tokenizer.convert_tokens_to_ids("<|im_start|>")
         self.imend_token_id = tokenizer.convert_tokens_to_ids("<|im_end|>")
@@ -262,23 +342,29 @@ class MossTTSDelayProcessor(ProcessorMixin):
         kwargs.pop("_from_auto", None)
 
         audio_tokenizer_name_or_path = kwargs.pop("codec_path", None)
-        if audio_tokenizer_name_or_path is None:
+        prompt_template = kwargs.pop("prompt_template", None)
+        if audio_tokenizer_name_or_path is None or prompt_template is None:
             processor_lookup_kwargs = dict(kwargs)
             try:
                 processor_dict, _ = cls.get_processor_dict(
                     pretrained_model_name_or_path,
                     **processor_lookup_kwargs,
                 )
-                audio_tokenizer_name_or_path = processor_dict.get(
-                    "audio_tokenizer_name_or_path"
-                )
-                audio_tokenizer_dict = processor_dict.get("audio_tokenizer", {})
-                if isinstance(audio_tokenizer_dict, dict):
-                    audio_tokenizer_name_or_path = audio_tokenizer_dict.get(
+                if prompt_template is None:
+                    prompt_template = processor_dict.get("prompt_template")
+                if audio_tokenizer_name_or_path is None:
+                    audio_tokenizer_name_or_path = processor_dict.get(
                         "audio_tokenizer_name_or_path"
-                    ) or audio_tokenizer_name_or_path
+                    )
+                    audio_tokenizer_dict = processor_dict.get("audio_tokenizer", {})
+                    if isinstance(audio_tokenizer_dict, dict):
+                        audio_tokenizer_name_or_path = audio_tokenizer_dict.get(
+                            "audio_tokenizer_name_or_path"
+                        ) or audio_tokenizer_name_or_path
             except Exception:
-                audio_tokenizer_name_or_path = None
+                pass
+        if prompt_template is None:
+            prompt_template = "auto"
         if audio_tokenizer_name_or_path is None:
             audio_tokenizer_name_or_path = "OpenMOSS-Team/MOSS-Audio-Tokenizer"
 
@@ -310,6 +396,7 @@ class MossTTSDelayProcessor(ProcessorMixin):
             tokenizer=tokenizer,
             audio_tokenizer=audio_tokenizer,
             model_config=model_config,
+            prompt_template=prompt_template,
             **kwargs,
         )
 
@@ -448,10 +535,13 @@ class MossTTSDelayProcessor(ProcessorMixin):
         sound_event: Optional[str] = None,
         ambient_sound: Optional[str] = None,
         language: Optional[str] = None,
+        scene: Optional[str] = None,
+        template: str = "moss_tts",
     ) -> Dict:
         if reference is not None and not isinstance(reference, list):
             reference = [reference]
-        if text is not None:
+        # The official TTSD processor feeds text verbatim (no robust normalizer).
+        if text is not None and template != "ttsd":
             text = normalize_tts_text(text)
         return UserMessage(
             text=text,
@@ -462,6 +552,8 @@ class MossTTSDelayProcessor(ProcessorMixin):
             sound_event=sound_event,
             ambient_sound=ambient_sound,
             language=language,
+            scene=scene,
+            template=template,
         ).to_dict()
 
     @staticmethod
@@ -486,6 +578,7 @@ class MossTTSDelayProcessor(ProcessorMixin):
         role = message["role"]
         if role == "user":
             kwargs = {key: message.get(key) for key in USER_MESSAGE_FIELDS}
+            kwargs["template"] = getattr(self, "prompt_template", "moss_tts")
             return self.build_user_message(**kwargs)
         if role == "assistant":
             return self.build_assistant_message(
@@ -640,7 +733,26 @@ class MossTTSDelayProcessor(ProcessorMixin):
             audio_gen_slot_token = self.audio_assistant_gen_slot_token
             audio_delay_slot_token = self.audio_assistant_delay_slot_token
 
-        if len(audio_codes_list):
+        if getattr(self, "prompt_template", "moss_tts") == "ttsd":
+            # Mirrors MOSS-TTSD: always follow model RVQ channels (n_vq=16) and
+            # truncate tokenizer outputs (e.g. 32-layer RVQ) to the first n_vq layers.
+            n_vq = self.model_config.n_vq
+            normalized_audio_codes_list: List[torch.Tensor] = []
+            for audio_codes in audio_codes_list:
+                if audio_codes.dim() != 2:
+                    raise RuntimeError(
+                        f"Expect audio codes with rank 2, got {tuple(audio_codes.shape)}"
+                    )
+                # Handle possible [NQ, T] layout.
+                if audio_codes.shape[1] < n_vq and audio_codes.shape[0] >= n_vq:
+                    audio_codes = audio_codes.transpose(0, 1)
+                if audio_codes.shape[1] < n_vq:
+                    raise RuntimeError(
+                        f"audio_codes channels ({audio_codes.shape[1]}) < model n_vq ({n_vq})"
+                    )
+                normalized_audio_codes_list.append(audio_codes[:, :n_vq])
+            audio_codes_list = normalized_audio_codes_list
+        elif len(audio_codes_list):
             n_vq = audio_codes_list[0].shape[1]
         else:
             n_vq = self.model_config.n_vq

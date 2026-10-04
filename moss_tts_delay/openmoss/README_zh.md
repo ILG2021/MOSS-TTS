@@ -268,3 +268,48 @@ Q4_K_M 是 backbone 权重量化，`--cache-type-* q8_0` 是 KV cache 量化，�
 ## 12. 多 LoRA 的容量边界
 
 `--lora NAME=PATH` 指定的 adapter 在 server 启动时一次性读取并常驻，单个请求通过 JSON 的 `lora` 字段选择；切换音色不会重新读取磁盘。当前实现适合“少量热门音色常驻”。它不是无限容量的 LoRA LRU：如果要部署上百个音色，建议把音色分成多个有界热集 worker，再由上层网关按音色路由；不要把全部 adapter 无限制塞进一个 8GB 进程。
+
+## 13. MOSS-TTSD（n_vq=16）基座与 LoRA
+
+MOSS-TTSD-v1.0 与 MOSS-TTS-v1.5 同为 `moss_tts_delay` 架构（Qwen3-8B），区别是 16 路 RVQ、带 `- Scene:` 字段的 prompt 模板，以及以 `[S1]`/`[S2]` 标注说话人的文本。openmoss 已原生支持；与 v1.5 的差异只有下面几点。
+
+1. **转换与量化**：与第 5、6 节相同，只换基座和输出名。scratch 目录必须单独存放，因为 LoRA 转换要用 TTSD 自己的 backbone：
+
+   ```powershell
+   python scripts\convert_hf_to_gguf.py `
+     --moss-tts OpenMOSS-Team/MOSS-TTSD-v1.0 `
+     --codec OpenMOSS-Team/MOSS-Audio-Tokenizer `
+     --backbone-dtype bf16 --sidecar-dtype bf16 `
+     --scratch-dir .\weights\convert-scratch-ttsd --keep-scratch `
+     --output .\weights\moss-ttsd-base.gguf
+   & llama-quantize.exe --token-embedding-type bf16 `
+     .\weights\moss-ttsd-base.gguf .\weights\moss-ttsd-base-q4km.gguf Q4_K_M
+   Copy-Item .\weights\moss-ttsd-base.extras.gguf .\weights\moss-ttsd-base-q4km.extras.gguf
+   ```
+
+2. **LoRA**：用 `sft_lora.py --model-path OpenMOSS-Team/MOSS-TTSD-v1.0` 训练，详见 [README_lora_zh.md](../finetuning/README_lora_zh.md) 的 TTSD 一节。转换时 `--base-qwen` 必须指向 **TTSD** 的 scratch：
+
+   ```powershell
+   python scripts\convert_moss_lora_to_gguf.py ..\..\output\ttsd-speaker-a `
+     --base-qwen .\weights\convert-scratch-ttsd\qwen3_backbone `
+     --outfile .\weights\loras\ttsd-speaker-a.gguf
+   ```
+
+   v1.5 的 LoRA 不能挂到 TTSD 基座上，TTSD 的 LoRA 也不能挂到 v1.5 上。
+
+3. **必须显式指定 `--template ttsd`**：openmoss 无法从 GGUF 区分 TTSD 与 MOSS-VoiceGenerator，两者都是 n_vq=16，`auto` 会按 voicegen 处理，导致 prompt 模板和采样参数都不对。
+   - CLI 和 server 直接加 `--template ttsd`。
+   - Gradio 加 `--template ttsd`。它会把该参数传给 server，在每段文本前自动补 `[S1]`（与训练时 `--speaker-tag auto` 一致），并把采样默认值改为 TTSD 官方的 1.1 / 0.9 / 50 / 1.1。
+
+   ```powershell
+   python clis\moss_tts_openmoss_app.py `
+     --template ttsd `
+     --model integrations\openmoss\weights\moss-ttsd-base-q4km.gguf `
+     --lora ttsd-speaker-a=integrations\openmoss\weights\loras\ttsd-speaker-a.gguf `
+     --port 7860
+   ```
+
+4. **注意事项**
+   - TTSD 模板里 `Tokens` 固定为 None，所以界面的“时长控制”在 TTSD 下无效。
+   - TTSD 不做文本规范化，原样读入；推理文本的标点风格应与训练文本一致。
+   - 同一 server 进程只能服务一种基座。v1.5 与 TTSD 需要分别启动，使用不同 `--openmoss-port`。
