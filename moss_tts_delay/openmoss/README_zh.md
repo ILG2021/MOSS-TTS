@@ -63,11 +63,14 @@ build-cuda\bin\Release\llama.dll
 build-cuda\bin\Release\ggml*.dll
 ```
 
-运行时必须让 DLL 可见。可将 `build-cuda\bin\Release` 加入当前会话 PATH：
+运行时必须让 DLL 可见。注意 ggml 的后端（`ggml-cuda.dll`、`ggml-cpu-*.dll`）是动态加载的，只会在 **exe 所在目录和当前工作目录** 中查找，不会查 PATH。否则会报 `no GPU device found` / `no backends are loaded`。把所有 DLL 复制到 exe 旁边：
 
 ```powershell
-$env:PATH = "integrations\openmoss\build-cuda\bin\Release;$env:PATH"
+Copy-Item build-cuda\bin\Release\*.dll build-cuda\Release\
 ```
+
+如果 `llama.dll` 本身也找不到，再把 `build-cuda\bin\Release` 加入当前会话 PATH。
+
 
 如果 CMake 报 `No CUDA toolset found`，需要在 Visual Studio Installer 中安装“使用 C++ 的桌面开发”，并安装与 VS 集成的 CUDA Toolkit；更换生成器或 CUDA toolset 后必须改用新构建目录。
 
@@ -188,11 +191,7 @@ CLI 用于验证基座、sidecar、CUDA 和 codec 是否能完整工作；当前
   --model .\weights\moss-tts-base-q4km.gguf `
   --lora speaker-a=.\weights\loras\speaker-a.gguf `
   --host 127.0.0.1 `
-  --port 8080 `
-  --main-gpu 0 `
-  --n-gpu-layers -1 `
-  --n-ctx 8192 `
-  --n-batch 512
+  --port 8080 
 ```
 
 启动阶段读取模型和所有 `--lora` 一次。`GET /health` 返回 `ok` 后，backbone、heads、codec 和 adapter 会一直保留在该 C++ 进程中；请求只选择 adapter、复用模型并重置生成状态，不会每次从磁盘重新载入。打开 `http://127.0.0.1:8080/` 即为 openmoss 自带界面。
@@ -221,14 +220,6 @@ python clis\moss_tts_openmoss_app.py `
   --model integrations\openmoss\weights\moss-tts-base-q4km.gguf `
   --lora speaker-a=integrations\openmoss\weights\loras\speaker-a.gguf `
   --lora speaker-b=integrations\openmoss\weights\loras\speaker-b.gguf `
-  --parallel 2 `
-  --main-gpu 0 `
-  --n-gpu-layers -1 `
-  --n-ctx 4096 `
-  --n-batch 256 `
-  --cache-type-k q8_0 `
-  --cache-type-v q8_0 `
-  --codec-cpu `
   --port 7860
 ```
 
