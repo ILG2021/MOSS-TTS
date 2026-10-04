@@ -24,33 +24,74 @@ Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 
 以下命令直接运行 Python 训练入口，无需启动 `.sh` 脚本。PowerShell 使用反引号 `` ` `` 续行；为便于复制，也可将整条命令写成一行。文档中的相对路径均相对于仓库根目录。
 
-数据格式与预处理方式见 [原微调文档](README_zh.md)。如果原始数据是连续编号的 LJSpeech
-短音频，可先按推荐的约 2 分钟长度合并。先用 `--dry-run` 检查分组计划：
+### 数据准备与 LJSpeech 连续短音频合并
+
+数据格式与预处理方式见 [原微调文档](README_zh.md)。如果原始数据是连续编号的 LJSpeech 短音频，可使用 `scripts\merge_ljspeech.py` 按目标 60 秒、上限 90 秒合并，并保留短尾段。此设置是微调数据准备的起步配置，不是官方最佳长度；合并脚本的完整说明见 [连续短音频合并文档](../../scripts/merge_ljspeech.md)。
+
+依赖：`pip install numpy soundfile`。合并过程在 CPU 上进行，不需要 GPU 或模型。
+
+#### 1. 输入格式与路径规则
+
+输入为 UTF-8（支持 BOM）清单，文件扩展名可以是 `.csv` 或 `.txt`，内容分隔符为 `|`：
+
+```text
+成音频文件夹/切片_1.wav|挺全面的哈，
+成音频文件夹/切片_2.wav|接下来我们继续。
+```
+
+- **路径兼容**：路径兼容正反斜杠。相对路径默认相对清单同目录的 `wavs` 文件夹，例如 `metadata.csv` 中的 `切片_1.wav` 会解析为 `wavs/切片_1.wav`，无需传 `--audio-root`；可用 `--audio-root` 显式覆盖。
+- **文本列选择**：标准三列 LJSpeech 可用 `--text-column 2` 选择规范化文本。
+
+#### 2. 合并操作与命令示例
+
+选择一个尚不存在的输出目录，执行全量合并：
 
 ```powershell
 python scripts\merge_ljspeech.py `
   --input "D:\dataset\metadata.txt" `
-  --output-dir "D:\dataset\merged_2min" `
-  --target-seconds 120 --max-seconds 150 --dry-run
+  --output-dir "D:\dataset\merged_60s" `
+  --target-seconds 60 --max-seconds 90 --min-seconds 0
 ```
 
-确认后去掉 `--dry-run` 生成合并数据：
+#### 3. 分组规则与连续性
 
-```powershell
-python scripts\merge_ljspeech.py `
-  --input "D:\dataset\metadata.txt" `
-  --output-dir "D:\dataset\merged_2min" `
-  --target-seconds 120 --max-seconds 150
-```
+- **连续性判定**：默认保持清单顺序。只有同一输入清单、同一文件夹、文件名末尾数字之前的前缀相同、编号递增 1 且采样率/声道相同，才会拼接。遇到编号缺口或格式变化就另起一组；没有数字编号的文件单独保留。
+- **排序选项**：若清单是 1、10、2 这种字典序，可加 `--order natural`（按自然数值排序），但应先确认编号确实代表时间顺序。
+- **分组合并上限**：`--max-clips 4` 限制最多四条一组，并非保证每组四条。
+- **拼接方式**：直接连接波形，保留原始静音；不重采样、不淡化、不插入静音。输出 float32 WAV，避免额外 PCM 量化，但比 PCM16 更占磁盘。采样率和声道保持原样。默认中文文本直接连接，不添加标点；英文可以用 `--text-joiner " "`。
 
-该命令会生成 `merged_2min\train_raw.jsonl`；完整参数和输入约束见
-[`scripts/merge_ljspeech.md`](../../scripts/merge_ljspeech.md)。未编码的数据再执行：
+#### 4. 时长控制与过滤机制
+
+脚本默认目标时长为 60 秒，最大时长为 90 秒，最小时长为 0 秒（上述命令显式写出默认值，也可以省略这三个参数）：
+
+- `--target-seconds 60`：累计达到设定秒数就结束当前组，不保证恰好相等，也不会截断原始切片。例如已有 55 秒，加入下一条 20 秒后输出 75 秒。
+- `--max-seconds 90`：每组的时长上限。若已有 55 秒，下一条为 40 秒，合计超过 90 秒，则先输出当前 55 秒组，40 秒切片进入下一组。单条原始音频已超过上限时会报错。
+- `--min-seconds 0`：默认保留所有短组，包括孤立单条和未达到目标的尾段（尾段是连续分组最后剩余的切片，不是音频末尾的静音）。若仍需沿用短组过滤，可设置 `--min-seconds 15`：不足 15 秒丢弃，恰好 15 秒保留，逐组打印被过滤的来源、条数和时长。
+
+**校验与安全**：
+- 过滤发生在 `--limit` 之前；全部被过滤时仅打印提示，不创建输出目录。
+- 重复路径、空文本会报错；当前缺失音频文件会被跳过，应核对输入记录与最终选中条数。
+- 脚本不做语义分段、说话人或声场检测：同前缀连续编号仍可能不是连续录音，需确认来自同一说话人的连续录音并人工抽查接缝。
+- 脚本不会修改源文件，也不会覆盖已有输出目录。中途失败的输出目录保留用于检查；修正问题后使用新目录重跑。`--limit` 仅限制输出条数，仍会检查所有输入文件头。
+
+#### 5. 输出结构
+
+合并后输出目录包含：
+
+- `wavs/`：保留来源相对音频根目录的文件夹层级，以组内首条文件名加 `_merge.wav` 命名。例如 `说话人/xxxx001.wav` 至 `说话人/xxxx003.wav` 合并为 `wavs/说话人/xxxx001_merge.wav`。保留的单条也使用此后缀。根目录外的绝对路径保留直接上级文件夹名；多个输入产生同名输出时会在写入前报错，请分开处理。
+- `metadata.txt`：相对输出目录的 `路径|文本`。若将它再次输入本脚本，需显式设置 `--audio-root` 为该输出目录（路径已带 `wavs/`）。
+- `train_raw.jsonl`：含绝对音频路径、文本、语言，可直接交给项目的 `prepare_data.py` 重新编码，不含参考音频或时长条件。
+- `sources.jsonl`：来源文件、文本、拼接位置（采样帧），方便检查接缝。
+
+#### 6. 音频特征预编码（prepare_data.py）
+
+合并生成 `train_raw.jsonl` 或已有未编码数据后，执行以下命令提取音频 Token 并生成最终训练数据：
 
 ```powershell
 python moss_tts_delay\finetuning\prepare_data.py `
   --model-path OpenMOSS-Team/MOSS-TTS-v1.5 `
   --codec-path OpenMOSS-Team/MOSS-Audio-Tokenizer `
-  --input-jsonl D:\dataset\merged_2min\train_raw.jsonl --output-jsonl train_with_codes.jsonl `
+  --input-jsonl D:\dataset\merged_60s\train_raw.jsonl --output-jsonl train_with_codes.jsonl `
   --device auto
 ```
 
@@ -78,7 +119,7 @@ python -m accelerate.commands.launch --num_processes 1 moss_tts_delay\finetuning
 
 先使用上述 batch size 1、BF16、梯度检查点和 SDPA 配置，并在命令末尾增加
 `--max-train-steps 10` 验证训练和保存，正式训练时删除该参数。
-建议使用约 2 分钟的音频素材，目标音频和参考音频均提前编码。
+建议先使用目标 60 秒、上限 90 秒合并的数据试跑，同时保留短句和尾段。目标音频和参考音频（如有）均提前编码；参考音频长度需单独设置，合并参数只控制目标音频。
 当前脚本不会自动截断超长样本；如显存不足，优先缩短单条音频和参考音频长度。
 梯度累积不会减少单条样本的显存占用。
 

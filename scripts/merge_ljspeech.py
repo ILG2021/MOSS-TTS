@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Merge consecutive LJSpeech WAV clips; see merge_ljspeech.md."""
+"""Merge consecutive LJSpeech WAV clips; see moss_tts_delay/finetuning/README_lora_zh.md."""
 from __future__ import annotations
 
 import argparse
