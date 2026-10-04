@@ -50,7 +50,7 @@ git submodule update --init --recursive
 cmake -S . -B build-cuda -A x64 `
   -DGGML_CUDA=ON `
   -DCMAKE_CUDA_ARCHITECTURES=native `
-  -T "cuda=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.4"
+  -T "cuda=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.4" -G "Visual Studio 17 2022"
 cmake --build build-cuda --config Release -j
 ```
 
@@ -110,7 +110,17 @@ Test-Path .\weights\convert-scratch\qwen3_backbone\config.json
 
 ## 6. 量化 backbone 为 Q4_K_M
 
-openmoss 的 in-tree llama.cpp 构建默认不生成量化工具。使用已经编译好的官方 llama.cpp `llama-quantize.exe`，并先将其所在目录加入 `PATH`：
+openmoss 的 in-tree llama.cpp 构建默认不生成量化工具。直接下载官方 llama.cpp release 的 CPU 包即可（量化只用 CPU）：
+
+```powershell
+New-Item -ItemType Directory -Force tools\llama.cpp | Out-Null
+curl.exe -L -o tools\llama.cpp\llama-cpu.zip `
+  https://github.com/ggml-org/llama.cpp/releases/download/b11146/llama-b11146-bin-win-cpu-x64.zip
+Expand-Archive -Force tools\llama.cpp\llama-cpu.zip tools\llama.cpp
+$env:PATH = "$PWD\tools\llama.cpp;$env:PATH"
+```
+
+然后量化：
 
 ```powershell
 & llama-quantize.exe `

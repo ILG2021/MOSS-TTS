@@ -84,9 +84,6 @@ llama-cpp-torch = [
     "torch>=2.4",
 ]
 
-[project.scripts]
-moss-tts-llama-cpp = "moss_tts_delay.llama_cpp.pipeline:main"
-
 [project.urls]
 Homepage = "https://github.com/OpenMOSS-Team/MOSS-TTS"
 Repository = "https://github.com/OpenMOSS-Team/MOSS-TTS"

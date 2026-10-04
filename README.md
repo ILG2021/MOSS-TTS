@@ -416,76 +416,9 @@ Currently available:
 
 Additional architecture-specific finetuning tutorials will be added under their corresponding directories.
 
-## llama.cpp Backend (Torch-Free Inference)
+## llama.cpp Backend (openmoss)
 
-For lightweight or edge deployment, MOSS-TTS supports a **torch-free** inference path using [llama.cpp](https://github.com/ggerganov/llama.cpp) for the Qwen3 backbone and ONNX Runtime / TensorRT for the audio tokenizer. No PyTorch installation required.
-
-We also maintain a newer first-class MOSS-TTS path in the companion repository [`OpenMOSS/llama.cpp`](https://github.com/OpenMOSS/llama.cpp/tree/moss-tts-firstclass). Unlike the legacy bridge backend documented below, it moves multi-channel embeddings, multi-head outputs, and delay-pattern decoding directly into `llama.cpp`.
-
-For that path, start from the [first-class e2e guide](https://github.com/OpenMOSS/llama.cpp/blob/moss-tts-firstclass/docs/moss-tts-firstclass-e2e.md).
-
-### Quick Start
-
-```bash
-# 1. Install (torch-free)
-pip install -e ".[llama-cpp-onnx]"
-
-# 2. Download pre-quantized backbone + embedding/lm_head weights
-huggingface-cli download OpenMOSS-Team/MOSS-TTS-GGUF --local-dir weights/MOSS-TTS-GGUF
-
-# 3. Download ONNX audio tokenizer
-huggingface-cli download OpenMOSS-Team/MOSS-Audio-Tokenizer-ONNX --local-dir weights/MOSS-Audio-Tokenizer-ONNX
-
-# 4. Build the C bridge (one-time, requires llama.cpp compiled from source)
-cd moss_tts_delay/llama_cpp && bash build_bridge.sh /path/to/llama.cpp && cd ../..
-
-# 5. Run inference
-python -m moss_tts_delay.llama_cpp \
-    --config configs/llama_cpp/default.yaml \
-    --text "Hello, world!" --output output.wav
-
-# 6. (Optional) Low-memory mode for 8 GB GPUs — loads/unloads components per stage
-python -m moss_tts_delay.llama_cpp \
-    --config configs/llama_cpp/trt-8gb.yaml \
-    --text "Hello, world!" --output output.wav
-```
-
-### Installation Profiles
-
-| Profile | Install Command | Dependencies | Use Case |
-|---|---|---|---|
-| **Torch-free (ONNX)** | `pip install -e ".[llama-cpp-onnx]"` | numpy, onnxruntime-gpu, tokenizers | Recommended starting point |
-| **Torch-free (TRT)** | `pip install -e ".[llama-cpp-trt]"` | numpy, tensorrt, cuda-python | Maximum audio tokenizer speed (build engines yourself) |
-| **Torch-accelerated** | `pip install -e ".[llama-cpp-onnx,llama-cpp-torch]"` | + torch | GPU-accelerated LM heads (~30x faster) |
-
-> **Want to convert weights yourself?** See the [conversion guide](moss_tts_delay/llama_cpp/conversion/README.md) for step-by-step instructions on extracting, converting, and quantizing MOSS-TTS weights with llama.cpp.
-
-### Model Weights
-
-| Repository | Contents | Download |
-|---|---|---|
-| [`OpenMOSS-Team/MOSS-TTS-GGUF`](https://huggingface.co/OpenMOSS-Team/MOSS-TTS-GGUF) | Q4_K_M backbone `.gguf`, `embeddings/` (`.npy`), `lm_heads/` (`.npy`), tokenizer | `huggingface-cli download OpenMOSS-Team/MOSS-TTS-GGUF --local-dir weights/MOSS-TTS-GGUF` |
-| [`OpenMOSS-Team/MOSS-Audio-Tokenizer-ONNX`](https://huggingface.co/OpenMOSS-Team/MOSS-Audio-Tokenizer-ONNX) | Encoder & decoder ONNX models | `huggingface-cli download OpenMOSS-Team/MOSS-Audio-Tokenizer-ONNX --local-dir weights/MOSS-Audio-Tokenizer-ONNX` |
-
-> **Note:** We do **not** provide pre-built TensorRT engines, as they are tied to your specific GPU and TensorRT version. To use TRT, build engines from the ONNX models yourself — see `moss_audio_tokenizer/trt/build_engine.sh`.
-
-### Configuration
-
-Four pre-built configs are provided in `configs/llama_cpp/`:
-
-- `default.yaml` — ONNX audio + GGUF backbone (recommended start)
-- `trt.yaml` — TensorRT audio + GGUF backbone (max throughput, user-built engines)
-- `trt-8gb.yaml` — Low-memory mode for 8 GB GPUs (staged loading, TRT audio)
-- `cpu-only.yaml` — fully CPU-based (no GPU required)
-
-Key config options:
-- `heads_backend: auto | numpy | torch` — LM heads computation backend
-- `audio_backend: onnx | trt | torch` — audio tokenizer backend
-- `low_memory: true | false` — staged loading for limited VRAM (loads/unloads encoder, backbone, decoder per stage)
-- `kv_cache_type_k / kv_cache_type_v` — KV cache quantization (e.g. `q8_0`, `q4_0`) to reduce VRAM
-- `flash_attn: auto | enabled | disabled` — flash attention for lower peak VRAM during prefill
-
-For full documentation, see [moss_tts_delay/llama_cpp/README.md](moss_tts_delay/llama_cpp/README.md).
+The legacy torch-free bridge backend (moss_tts_delay/llama_cpp) has been removed. For llama.cpp / GGML inference, use the openmoss path: see [moss_tts_delay/openmoss/README_zh.md](moss_tts_delay/openmoss/README_zh.md).
 
 ## SGLang Backend (Accelerated Inference)
 
