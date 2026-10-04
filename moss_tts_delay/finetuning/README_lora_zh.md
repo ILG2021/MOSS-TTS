@@ -239,13 +239,19 @@ TTSD-v1.0 与 v1.5 同为 `moss_tts_delay` 架构，代码沿用同一套，不�
      --model-path OpenMOSS-Team/MOSS-TTSD-v1.0 `
      --train-jsonl train_ttsd_codes.jsonl `
      --output-dir output\ttsd_lora `
-     --per-device-batch-size 1 --gradient-accumulation-steps 8 `
-     --learning-rate 1e-4 --num-epochs 10 --mixed-precision bf16 `
+     --per-device-batch-size 1 --gradient-accumulation-steps 4 `
+     --learning-rate 1e-4 --lr-scheduler-type cosine --warmup-steps 50 `
+     --weight-decay 0.01 --max-grad-norm 1.0 `
+     --channelwise-loss-weight "1,16" `
+     --num-epochs 18 --mixed-precision bf16 `
      --gradient-checkpointing --attn-implementation sdpa `
-     --lora-r 16 --lora-alpha 32 --lora-dropout 0.05
+     --lora-r 32 --lora-alpha 64 --lora-dropout 0.05 `
+     --save-steps 100
    ```
 
-   - `--channelwise-loss-weight` 默认是 `1,32`：音频总权重 32 平均分到 16 个头，每个头为 2。如果想与 v1.5 保持相同的每头权重，可以改成 `1,16`。
+   - `--channelwise-loss-weight "1,16"`：强烈建议显式传入。TTSD 音频只有 16 路，传 `"1,16"` 才能使每个音频头权重与 v1.5 一样保持为 1.0；若保留默认 `"1,32"` 则每个音频头权重会变成 2.0。
+   - `--lora-r 32 --lora-alpha 64`：TTSD 仍为 8B 语言模型底座，r=32 容量充足。
+   - 轮数与过拟合：TTSD 通道少一半（16 路），单人声数据比 v1.5 更易拟合，建议开启 `--save-steps` 并重点抽测 Epoch 6 ~ 12 检查点。
    - 实际使用的模板记录在 `finetune_args.json`（`resolved_prompt_template`）和每个 checkpoint 的 `processor_config.json` 里。完整续训时会自动恢复。
 
 3. 合并：用法同上，`--model-path` 必须是 TTSD。`merge_lora.py` 会把 adapter 的 `prompt_template` 写入合并后模型的 `processor_config.json`。
