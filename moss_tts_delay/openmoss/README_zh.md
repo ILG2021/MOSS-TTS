@@ -120,17 +120,22 @@ New-Item -ItemType Directory -Force tools\llama.cpp | Out-Null
 curl.exe -L -o tools\llama.cpp\llama-cpu.zip `
   https://github.com/ggml-org/llama.cpp/releases/download/b11146/llama-b11146-bin-win-cpu-x64.zip
 Expand-Archive -Force tools\llama.cpp\llama-cpu.zip tools\llama.cpp
-$env:PATH = "$PWD\tools\llama.cpp;$env:PATH"
 ```
 
 然后量化：
 
 ```powershell
-& llama-quantize.exe `
+tools\llama.cpp\llama-quantize.exe  `
   --token-embedding-type bf16 `
   .\weights\moss-tts-base.gguf `
   .\weights\moss-tts-base-q4km.gguf `
   Q4_K_M
+
+tools\llama.cpp\llama-quantize.exe  `
+  --token-embedding-type bf16 `
+  .\weights\moss-tts-base.gguf `
+  .\weights\moss-tts-base-q8.gguf `
+  Q8_0
 ```
 
 token embedding 必须保留 BF16。不要量化 sidecar；Q4_K_M 只用于 backbone。为保证 openmoss 能按 backbone 文件名准确找到 sidecar，复制成相同 stem：
@@ -282,7 +287,8 @@ MOSS-TTSD-v1.0 与 MOSS-TTS-v1.5 同为 `moss_tts_delay` 架构（Qwen3-8B），
      --backbone-dtype bf16 --sidecar-dtype bf16 `
      --scratch-dir .\weights\convert-scratch-ttsd --keep-scratch `
      --output .\weights\moss-ttsd-base.gguf
-   & llama-quantize.exe --token-embedding-type bf16 `
+  
+  tools\llama.cpp\llama-quantize.exe --token-embedding-type bf16 `
      .\weights\moss-ttsd-base.gguf .\weights\moss-ttsd-base-q4km.gguf Q4_K_M
    Copy-Item .\weights\moss-ttsd-base.extras.gguf .\weights\moss-ttsd-base-q4km.extras.gguf
    ```
