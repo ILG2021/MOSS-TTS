@@ -144,6 +144,10 @@ token embedding 必须保留 BF16。不要量化 sidecar；Q4_K_M 只用于 back
 Copy-Item `
   .\weights\moss-tts-base.extras.gguf `
   .\weights\moss-tts-base-q4km.extras.gguf
+
+Copy-Item `
+  .\weights\moss-tts-base.extras.gguf `
+  .\weights\moss-tts-base-q8.extras.gguf
 ```
 
 最终必须同时存在：

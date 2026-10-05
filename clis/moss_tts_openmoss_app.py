@@ -852,7 +852,7 @@ def main() -> None:
     parser.add_argument("--preload", action="store_true")
 
     # Gradio app & chunking configuration (aligned with moss_tts_app.py)
-    parser.add_argument("--chunk-chars", type=int, default=400, help="界面分段字数初始值（默认400，可在界面修改）")
+    parser.add_argument("--chunk-chars", type=int, default=200, help="界面分段字数初始值（默认400，可在界面修改）")
     parser.add_argument("--asr-model", default="large-v3-turbo", help="faster-whisper 模型名或本地 CTranslate2 模型目录")
     parser.add_argument("--asr-device", choices=["cpu", "cuda"], default="cpu", help="默认 CPU int8，避免占用 TTS 显存")
     parser.add_argument("--host", default="127.0.0.1")

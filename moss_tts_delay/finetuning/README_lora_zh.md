@@ -48,17 +48,17 @@ Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 
 ```powershell
 python scripts\merge_ljspeech.py `
-  --input "D:\dataset\metadata.txt" `
-  --output-dir "D:\dataset\merged_mix" `
-  --max-seconds 90 --target-dist "5-15:0.15,15-30:0.15,30-60:0.30,60-90:0.40" --seed 42
+  --input "data\metadata.txt" `
+  --output-dir "data\merged_mix" `
+  --max-seconds 90 --target-dist "5-15:0.10,15-30:0.30,30-60:0.45,60-90:0.15" --seed 7
 ```
 
 备选：固定目标时长。所有样本都集中在 60 秒左右，缺少短段，推理时用短分段容易与训练分布不匹配，一般不推荐：
 
 ```powershell
 python scripts\merge_ljspeech.py `
-  --input "D:\dataset\metadata.txt" `
-  --output-dir "D:\dataset\merged_60s" `
+  --input "data\metadata.txt" `
+  --output-dir "data\merged_60s" `
   --target-seconds 60 --max-seconds 90 --min-seconds 0
 ```
 
@@ -108,7 +108,7 @@ python scripts\merge_ljspeech.py `
 python moss_tts_delay\finetuning\prepare_data.py `
   --model-path OpenMOSS-Team/MOSS-TTS-v1.5 `
   --codec-path OpenMOSS-Team/MOSS-Audio-Tokenizer `
-  --input-jsonl D:\dataset\merged_mix\train_raw.jsonl --output-jsonl train_with_codes.jsonl `
+  --input-jsonl data\merged_mix\train_raw.jsonl --output-jsonl train_with_codes.jsonl `
   --device auto
 ```
 
@@ -119,11 +119,21 @@ python moss_tts_delay\finetuning\prepare_data.py `
 python -m accelerate.commands.launch --num_processes 1 moss_tts_delay\finetuning\sft_lora.py `
   --model-path OpenMOSS-Team/MOSS-TTS-v1.5 `
   --train-jsonl train_with_codes.jsonl `
-  --output-dir output\moss_tts_lora `
-  --per-device-batch-size 1 --gradient-accumulation-steps 8 `
-  --learning-rate 1e-4 --num-epochs 3 --mixed-precision bf16 `
-  --gradient-checkpointing --attn-implementation sdpa `
-  --lora-r 16 --lora-alpha 32 --lora-dropout 0.05
+  --output-dir output\moss_tts_lora_trial `
+  --max-train-steps 5000 `
+  --save-steps 200 `
+  --weight-decay 0.01 `
+  --warmup-ratio 0.01 `
+  --lr-scheduler-type cosine `
+  --per-device-batch-size 1 `
+  --gradient-accumulation-steps 4 `
+  --learning-rate 5e-5 `
+  --mixed-precision bf16 `
+  --gradient-checkpointing `
+  --attn-implementation sdpa `
+  --lora-r 32 `
+  --lora-alpha 64 `
+  --lora-dropout 0.05
 ```
 
 在 Git Bash/WSL 中可将上面的 `python -m accelerate.commands.launch` 换回 `accelerate launch`，并将路径分隔符改为 `/`。
@@ -228,7 +238,7 @@ TTSD-v1.0 与 v1.5 同为 `moss_tts_delay` 架构，代码沿用同一套，不�
    python moss_tts_delay\finetuning\prepare_data.py `
      --model-path OpenMOSS-Team/MOSS-TTSD-v1.0 `
      --codec-path OpenMOSS-Team/MOSS-Audio-Tokenizer `
-     --input-jsonl D:\dataset\merged_mix\train_raw.jsonl --output-jsonl train_ttsd_codes.jsonl `
+     --input-jsonl data\merged_mix\train_raw.jsonl --output-jsonl train_ttsd_codes.jsonl `
      --device auto
    ```
 
